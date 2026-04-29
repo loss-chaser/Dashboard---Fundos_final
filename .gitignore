@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+.env
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# Pastas de cache do build (NÃO commitar — só o resultado em data/)
+dados_cvm/
+cache/
+saida/
+
+# Logs
+*.log

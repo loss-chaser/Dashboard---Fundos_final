@@ -1,0 +1,49 @@
+name: Atualizar dados diariamente
+
+# Roda todo dia às 11:00 UTC = 08:00 horário de Brasília
+# (CVM publica os dados do dia útil anterior por volta das 06:00 BRT)
+on:
+  schedule:
+    - cron: "0 11 * * 1-5"  # seg-sex 11:00 UTC
+  workflow_dispatch:  # permite rodar manualmente pelo painel do GitHub
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Rodar build_data.py
+        run: python build_data.py
+
+      - name: Verificar se houve mudanças
+        id: check
+        run: |
+          if [ -n "$(git status --porcelain data/)" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commitar parquets atualizados
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          git commit -m "chore: atualização automática de dados [skip ci]"
+          git push

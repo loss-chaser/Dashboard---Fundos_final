@@ -1,0 +1,26 @@
+{
+  "data_atualizacao": "2026-04-29T10:58:03.027180",
+  "data_ini": "2023-04-30",
+  "data_fim": "2026-04-29",
+  "anos_historico": 3,
+  "n_fundos": 15,
+  "n_dias": 750,
+  "ultima_cota": "2026-04-24",
+  "fundos": [
+    "Squadra Long Biased FIF Cotas FIA",
+    "Real Investor FIC FIF Ações RL",
+    "Oceana Long Biased FIC FIF Ações RL",
+    "Opportunity Log FIF Ações RL",
+    "SPX Patriot FIF CIC Ações RL",
+    "Kapitalo Tarkus FIF Cotas FIA",
+    "Alphakey Ações FIF Cotas FIA",
+    "Constellation F FIF Cotas FIA",
+    "Encore Long Bias FIF Cotas FIM",
+    "Truxt Long Bias Access FIF Cotas FIA",
+    "Absolute Pace FIC FIF Ações RL",
+    "Itaú Optimus Long Bias Multimercado FIF",
+    "Navi Long Biased FIF CIC Inv. Ações RL",
+    "AWR Capital",
+    "Dynamo Cougar FIF"
+  ]
+}
