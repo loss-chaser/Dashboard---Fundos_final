@@ -50,4 +50,9 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/
           git commit -m "chore: atualização automática de dados [skip ci]"
-          git push
+          # Tenta dar push até 3 vezes, fazendo rebase caso o main tenha avançado
+          for i in 1 2 3; do
+            git pull --rebase origin main && git push && break
+            echo "Tentativa $i falhou, aguardando 5s..."
+            sleep 5
+          done
