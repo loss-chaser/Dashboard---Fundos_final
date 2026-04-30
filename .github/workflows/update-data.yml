@@ -8,7 +8,6 @@ on:
 permissions:
   contents: write
 
-# Garante que só uma execução roda por vez (evita race condition)
 concurrency:
   group: update-data
   cancel-in-progress: false
@@ -47,27 +46,36 @@ jobs:
             echo "changed=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Commitar e pushar parquets atualizados
+      - name: Commitar e pushar parquets atualizados (GitHub)
         if: steps.check.outputs.changed == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Salva os parquets gerados num lugar seguro
           mkdir -p /tmp/data_novo
           cp -r data/* /tmp/data_novo/
 
-          # Sincroniza 100% com o remoto (descarta qualquer divergência local)
           git fetch origin main
           git reset --hard origin/main
 
-          # Restaura os parquets em cima do main atualizado
           cp -r /tmp/data_novo/* data/
 
-          # Commita e pusha
           git add data/
           git commit -m "chore: atualização automática de dados [skip ci]" || {
-            echo "Nada novo pra commitar após reset (main já estava atualizado)."
+            echo "Nada novo pra commitar."
             exit 0
           }
           git push origin main
+
+      - name: Sincronizar com Hugging Face Space
+        if: steps.check.outputs.changed == 'true'
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          # Adiciona o remote do HF com autenticação
+          git remote add hf https://loss-chaser:${HF_TOKEN}@huggingface.co/spaces/loss-chaser/dashboard-fundos
+          
+          # Pusha pro HF (force pra resolver qualquer divergência histórica entre os repos)
+          git push hf main --force
+          
+          echo "✓ Hugging Face Space atualizado"
