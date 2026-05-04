@@ -1,10 +1,10 @@
 {
-  "data_atualizacao": "2026-05-01T14:42:32.619577",
-  "data_ini": "2023-05-02",
-  "data_fim": "2026-05-01",
+  "data_atualizacao": "2026-05-04T17:19:19.164183",
+  "data_ini": "2023-05-05",
+  "data_fim": "2026-05-04",
   "anos_historico": 3,
   "n_fundos": 15,
-  "n_dias": 753,
+  "n_dias": 750,
   "ultima_cota": "2026-04-29",
   "fundos": [
     "Squadra Long Biased FIF Cotas FIA",
