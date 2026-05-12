@@ -74,12 +74,12 @@ MIN_OBS_METRICAS = 10          # mínimo de dias p/ calcular métricas
 # CORES (dashboard)
 # ─────────────────────────────────────────────────────────────────────────────
 COR_AWR      = "#C8A96E"       # dourado AWR
-COR_AWR_BG   = "#1A1A2E"       # fundo escuro
+COR_AWR_BG   = "#111318"       # fundo escuro (slate)
 COR_IBOV     = "#E74C3C"       # vermelho Ibov
 COR_CDI      = "#3498DB"       # azul CDI
-COR_OUTROS   = "#7F8C8D"       # cinza peers
-COR_POSITIVO = "#2E7D32"
-COR_NEGATIVO = "#C62828"
+COR_OUTROS   = "#5E6A7A"       # cinza slate peers
+COR_POSITIVO = "#22C55E"
+COR_NEGATIVO = "#EF4444"
 # Cores individuais para cada fundo no gráfico de evolução
 CORES_FUNDOS: dict[str, str] = {
     "AWR Capital":                                "#C8A96E",
@@ -100,5 +100,5 @@ CORES_FUNDOS: dict[str, str] = {
 # ─────────────────────────────────────────────────────────────────────────────
 # EMAIL (mantido do seu código original)
 # ─────────────────────────────────────────────────────────────────────────────
-ENVIAR_EMAIL = False
-LINK_DASHBOARD = "http://127.0.0.1:8050"
+ENVIAR_EMAIL = True
+LINK_DASHBOARD = "https://loss-chaser-dashboard-fundos.hf.space"
