@@ -146,9 +146,9 @@ app.layout = html.Div(
                     dcc.DatePickerRange(
                         id="date-range",
                         min_date_allowed=date(2020, 1, 1),
-                        max_date_allowed=date.today(),
+                        max_date_allowed=date.today(),  # atualizado via callback
                         start_date=date(2024, 1, 1),
-                        end_date=date.today(),
+                        end_date=date.today(),          # atualizado via callback
                         display_format="DD/MM/YYYY",
                         style={"fontSize": "12px"},
                     ),
@@ -311,7 +311,18 @@ print("\n" + "=" * 60)
 print("  AWR Capital — Carregando parquets pré-processados...")
 print("=" * 60 + "\n")
 inicializar_global()
-_DEFAULT_KEY = _build_cache(date.today() - timedelta(days=365), date.today())
+# _DEFAULT_KEY calculado dinamicamente no callback — não congela a data no startup
+
+
+@app.callback(
+    Output("date-range", "max_date_allowed"),
+    Output("date-range", "end_date"),
+    Input("btn-refresh", "n_clicks"),
+)
+def atualizar_data_maxima(n_clicks):
+    """Atualiza o limite máximo e end_date do DatePicker para sempre refletir hoje."""
+    hoje = date.today()
+    return hoje, hoje
 
 
 @app.callback(
@@ -321,11 +332,19 @@ _DEFAULT_KEY = _build_cache(date.today() - timedelta(days=365), date.today())
     Input("date-range", "end_date"),
 )
 def load_data(n_clicks, start_date, end_date):
+    # Sempre recalcula "hoje" na hora do callback — nunca congela a data
+    hoje = date.today()
+
     if start_date is None or end_date is None:
-        return _DEFAULT_KEY
+        return _build_cache(hoje - timedelta(days=365), hoje)
 
     sd = date.fromisoformat(start_date[:10])
     ed = date.fromisoformat(end_date[:10])
+
+    # Se end_date veio do DatePicker mas já é dia anterior, força hoje
+    if ed < hoje:
+        ed = hoje
+
     cache_key = f"{sd}_{ed}"
 
     # Usa cache se já temos e não foi clique em Atualizar
@@ -340,7 +359,7 @@ def load_data(n_clicks, start_date, end_date):
         log.error("Erro ao carregar dados: %s", e)
         import traceback
         traceback.print_exc()
-        return _DEFAULT_KEY
+        return _build_cache(hoje - timedelta(days=365), hoje)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
