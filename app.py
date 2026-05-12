@@ -81,28 +81,86 @@ app = dash.Dash(
     suppress_callback_exceptions=True,
 )
 
+app.index_string = """
+<!DOCTYPE html>
+<html>
+<head>
+{%metas%}
+<title>{%title%}</title>
+{%favicon%}
+{%css%}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; }
+body {
+    font-family: 'Inter', 'Segoe UI', sans-serif !important;
+    background: #0A0B0E !important;
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #0A0B0E; }
+::-webkit-scrollbar-thumb { background: #1E2330; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #2A3040; }
+
+.card-kpi {
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.card-kpi:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.45) !important;
+}
+.tab-modern .tab {
+    border-bottom: 2px solid transparent !important;
+    background: transparent !important;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+.tab-modern .tab:hover { color: #C8A96E !important; }
+
+.Select-control { background-color: #111318 !important; border-color: #1E2330 !important; }
+.Select-menu-outer { background-color: #111318 !important; border-color: #1E2330 !important; }
+.Select-option { background-color: #111318 !important; color: #EFF1F5 !important; }
+.Select-option:hover { background-color: #1E2330 !important; }
+.Select-value-label { color: #EFF1F5 !important; }
+.DateInput_input { background: #111318 !important; color: #EFF1F5 !important; font-size: 12px !important; }
+.DateRangePickerInput { background: #111318 !important; border-color: #1E2330 !important; }
+</style>
+</head>
+<body>
+{%app_entry%}
+<footer>
+{%config%}
+{%scripts%}
+{%renderer%}
+</footer>
+</body>
+</html>
+"""
+
 
 def _tab_style():
     return {
-        "backgroundColor": "#0D0D1A",
-        "color": "#888",
-        "border": "1px solid #2A2A4A",
-        "padding": "10px 20px",
+        "backgroundColor": "transparent",
+        "color": "#5E6A7A",
+        "border": "none",
+        "borderBottom": "2px solid transparent",
+        "padding": "10px 22px",
         "fontSize": "13px",
         "fontWeight": 500,
+        "letterSpacing": "0.3px",
     }
 
 def _tab_selected():
     return {
-        "backgroundColor": "#1A1A2E",
+        "backgroundColor": "transparent",
         "color": COR_AWR,
-        "borderTop": f"2px solid {COR_AWR}",
-        "borderLeft": "1px solid #2A2A4A",
-        "borderRight": "1px solid #2A2A4A",
-        "borderBottom": "none",
-        "padding": "10px 20px",
+        "border": "none",
+        "borderBottom": f"2px solid {COR_AWR}",
+        "padding": "10px 22px",
         "fontSize": "13px",
         "fontWeight": 700,
+        "letterSpacing": "0.3px",
     }
 
 
@@ -111,38 +169,52 @@ def _tab_selected():
 # ─────────────────────────────────────────────────────────────────────────────
 app.layout = html.Div(
     style={
-        "fontFamily": "'DM Sans', 'Segoe UI', sans-serif",
-        "backgroundColor": "#0D0D1A",
+        "fontFamily": "'Inter', 'Segoe UI', sans-serif",
+        "backgroundColor": "#0A0B0E",
         "minHeight": "100vh",
-        "color": "#E8E8E8",
+        "color": "#EFF1F5",
     },
     children=[
         # ── Header ──
         html.Div(
             style={
-                "background": "linear-gradient(135deg, #0D0D1A 0%, #1A1A2E 100%)",
-                "borderBottom": "1px solid #2A2A4A",
-                "padding": "20px 32px",
+                "background": "#0A0B0E",
+                "borderTop": f"3px solid {COR_AWR}",
+                "borderBottom": "1px solid #1E2330",
+                "padding": "16px 36px",
                 "display": "flex",
                 "alignItems": "center",
                 "justifyContent": "space-between",
+                "position": "sticky",
+                "top": "0",
+                "zIndex": "100",
+                "backdropFilter": "blur(8px)",
             },
             children=[
+                html.Div(
+                    style={"display": "flex", "alignItems": "baseline", "gap": "10px"},
+                    children=[
+                        html.Span("AWR", style={
+                            "fontSize": "20px", "fontWeight": 700,
+                            "color": COR_AWR, "letterSpacing": "3px",
+                        }),
+                        html.Span("CAPITAL", style={
+                            "fontSize": "20px", "fontWeight": 300,
+                            "color": "#EFF1F5", "letterSpacing": "3px",
+                        }),
+                        html.Span("·", style={"color": "#1E2330", "fontSize": "18px", "margin": "0 4px"}),
+                        html.Span("Comparador", style={
+                            "fontSize": "13px", "color": "#5E6A7A",
+                            "fontWeight": 400, "letterSpacing": "0.5px",
+                        }),
+                    ],
+                ),
                 html.Div([
-                    html.H1(
-                        "Comparador AWR",
-                        style={
-                            "margin": 0, "fontSize": "24px", "fontWeight": 700,
-                            "color": COR_AWR, "letterSpacing": "1px",
-                        },
-                    ),
-                    html.Span(
-                        "AWR Capital vs Peers vs Benchmarks",
-                        style={"color": "#666", "fontSize": "13px", "marginLeft": "12px"},
-                    ),
-                ]),
-                html.Div([
-                    html.Label("Período:", style={"color": "#888", "fontSize": "12px", "marginRight": "8px"}),
+                    html.Label("Período", style={
+                        "color": "#5E6A7A", "fontSize": "11px",
+                        "marginRight": "8px", "textTransform": "uppercase",
+                        "letterSpacing": "0.8px",
+                    }),
                     dcc.DatePickerRange(
                         id="date-range",
                         min_date_allowed=date(2020, 1, 1),
@@ -158,15 +230,16 @@ app.layout = html.Div(
                         n_clicks=0,
                         style={
                             "marginLeft": "12px",
-                            "padding": "8px 20px",
+                            "padding": "8px 22px",
                             "backgroundColor": COR_AWR,
-                            "color": "#0D0D1A",
+                            "color": "#0A0B0E",
                             "border": "none",
-                            "borderRadius": "4px",
+                            "borderRadius": "5px",
                             "fontWeight": 700,
                             "cursor": "pointer",
                             "fontSize": "12px",
-                            "letterSpacing": "0.5px",
+                            "letterSpacing": "0.8px",
+                            "textTransform": "uppercase",
                         },
                     ),
                 ], style={"display": "flex", "alignItems": "center"}),
@@ -174,17 +247,17 @@ app.layout = html.Div(
         ),
 
         # ── Cards resumo ──
-        html.Div(id="cards-resumo", style={"padding": "20px 32px"}),
+        html.Div(id="cards-resumo", style={"padding": "24px 36px 8px"}),
 
         # ── Tabs ──
         dcc.Tabs(
             id="tabs",
             value="tab-risco-retorno",
-            style={"padding": "0 32px"},
+            style={"padding": "0 36px", "borderBottom": "1px solid #1E2330"},
             colors={
-                "border": "#2A2A4A",
+                "border": "transparent",
                 "primary": COR_AWR,
-                "background": "#0D0D1A",
+                "background": "transparent",
             },
             children=[
                 dcc.Tab(label="Risco × Retorno", value="tab-risco-retorno",
@@ -204,7 +277,7 @@ app.layout = html.Div(
             type="dot",
             color=COR_AWR,
             children=[
-                html.Div(id="tab-content", style={"padding": "20px 32px"}),
+                html.Div(id="tab-content", style={"padding": "24px 36px"}),
             ],
         ),
 
@@ -215,9 +288,10 @@ app.layout = html.Div(
         html.Div(
             "AWR Capital · Dados: CVM + Yahoo Finance + BCB",
             style={
-                "textAlign": "center", "color": "#444",
+                "textAlign": "center", "color": "#2A3040",
                 "fontSize": "11px", "padding": "20px",
-                "borderTop": "1px solid #1A1A2E",
+                "borderTop": "1px solid #111318",
+                "letterSpacing": "0.5px",
             },
         ),
     ],
@@ -311,7 +385,18 @@ print("\n" + "=" * 60)
 print("  AWR Capital — Carregando parquets pré-processados...")
 print("=" * 60 + "\n")
 inicializar_global()
-_DEFAULT_KEY = _build_cache(date.today() - timedelta(days=365), date.today())
+# _DEFAULT_KEY calculado dinamicamente no callback — não congela a data no startup
+
+
+@app.callback(
+    Output("date-range", "max_date_allowed"),
+    Output("date-range", "end_date"),
+    Input("btn-refresh", "n_clicks"),
+)
+def atualizar_data_maxima(n_clicks):
+    """Atualiza o limite máximo e end_date do DatePicker para sempre refletir hoje."""
+    hoje = date.today()
+    return hoje, hoje
 
 
 @app.callback(
@@ -321,11 +406,19 @@ _DEFAULT_KEY = _build_cache(date.today() - timedelta(days=365), date.today())
     Input("date-range", "end_date"),
 )
 def load_data(n_clicks, start_date, end_date):
+    # Sempre recalcula "hoje" na hora do callback — nunca congela a data
+    hoje = date.today()
+
     if start_date is None or end_date is None:
-        return _DEFAULT_KEY
+        return _build_cache(hoje - timedelta(days=365), hoje)
 
     sd = date.fromisoformat(start_date[:10])
     ed = date.fromisoformat(end_date[:10])
+
+    # Se end_date veio do DatePicker mas já é dia anterior, força hoje
+    if ed < hoje:
+        ed = hoje
+
     cache_key = f"{sd}_{ed}"
 
     # Usa cache se já temos e não foi clique em Atualizar
@@ -340,7 +433,7 @@ def load_data(n_clicks, start_date, end_date):
         log.error("Erro ao carregar dados: %s", e)
         import traceback
         traceback.print_exc()
-        return _DEFAULT_KEY
+        return _build_cache(hoje - timedelta(days=365), hoje)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -384,26 +477,31 @@ def update_cards(cache_key):
 
     def card(titulo, valor, sub, cor_borda):
         return html.Div(
+            className="card-kpi",
             style={
-                "backgroundColor": "#1A1A2E",
-                "borderLeft": f"4px solid {cor_borda}",
-                "borderRadius": "6px",
-                "padding": "16px 20px",
+                "backgroundColor": "#111318",
+                "border": "1px solid #1E2330",
+                "borderTop": f"2px solid {cor_borda}",
+                "borderRadius": "8px",
+                "padding": "18px 22px",
                 "flex": "1",
                 "marginRight": "12px",
-                "boxShadow": "0 2px 8px rgba(0,0,0,0.3)",
+                "boxShadow": "0 2px 12px rgba(0,0,0,0.35)",
             },
             children=[
                 html.Div(titulo, style={
-                    "fontSize": "11px", "color": "#888",
-                    "textTransform": "uppercase", "letterSpacing": "0.8px",
+                    "fontSize": "10px", "color": "#5E6A7A",
+                    "textTransform": "uppercase", "letterSpacing": "1px",
+                    "fontWeight": 600,
                 }),
                 html.Div(valor, style={
-                    "fontSize": "28px", "fontWeight": 700, "color": "#E8E8E8",
-                    "marginTop": "4px",
+                    "fontSize": "26px", "fontWeight": 700, "color": "#EFF1F5",
+                    "marginTop": "6px",
+                    "fontFamily": "'JetBrains Mono', 'DM Mono', monospace",
+                    "letterSpacing": "-0.5px",
                 }),
                 html.Div(sub, style={
-                    "fontSize": "12px", "color": "#666", "marginTop": "6px",
+                    "fontSize": "11px", "color": "#5E6A7A", "marginTop": "8px",
                 }),
             ],
         )
@@ -485,10 +583,10 @@ def _tab_risco_retorno(d):
             y=pares["Ret_ann"],
             mode="markers",
             marker=dict(
-                size=10,
+                size=9,
                 color=COR_OUTROS,
-                opacity=0.6,
-                line=dict(width=0.5, color="#555"),
+                opacity=0.55,
+                line=dict(width=0, color="transparent"),
             ),
             text=pares["Fundo"],
             customdata=np.stack([
@@ -565,15 +663,27 @@ def _tab_risco_retorno(d):
 
     fig.update_layout(
         template="plotly_dark",
-        paper_bgcolor="#0D0D1A",
-        plot_bgcolor="#12122A",
-        title=dict(text="Risco × Retorno (anualizados)", font=dict(size=16, color="#E8E8E8")),
-        xaxis=dict(title="Volatilidade anualizada", tickformat=".0%", gridcolor="#1E1E3A"),
-        yaxis=dict(title="Retorno anualizado", tickformat=".0%", gridcolor="#1E1E3A",
-                   zeroline=True, zerolinecolor="#333"),
-        legend=dict(orientation="h", y=-0.15, font=dict(size=11)),
+        paper_bgcolor="#0A0B0E",
+        plot_bgcolor="#111318",
+        title=dict(
+            text="Risco × Retorno (anualizados)",
+            font=dict(size=15, color="#EFF1F5", family="Inter"),
+        ),
+        xaxis=dict(
+            title="Volatilidade anualizada", tickformat=".0%",
+            gridcolor="#1A1F2B", ticklen=0, tickfont=dict(color="#5E6A7A"),
+        ),
+        yaxis=dict(
+            title="Retorno anualizado", tickformat=".0%",
+            gridcolor="#1A1F2B", ticklen=0, tickfont=dict(color="#5E6A7A"),
+            zeroline=True, zerolinecolor="#2A3040",
+        ),
+        legend=dict(orientation="h", y=-0.15, font=dict(size=11, color="#5E6A7A")),
         margin=dict(l=60, r=30, t=60, b=80),
-        hoverlabel=dict(bgcolor="#1A1A2E", font_size=12),
+        hoverlabel=dict(
+            bgcolor="#111318", font_size=12,
+            font_family="Inter", bordercolor="#1E2330",
+        ),
     )
 
     return dcc.Graph(figure=fig, style={"height": "600px"})
@@ -641,21 +751,30 @@ def _tab_evolucao(d):
 
     fig.update_layout(
         template="plotly_dark",
-        paper_bgcolor="#0D0D1A",
-        plot_bgcolor="#12122A",
-        title=dict(text="Evolução comparada (base 100)", font=dict(size=16, color="#E8E8E8")),
-        xaxis=dict(title="", gridcolor="#1E1E3A"),
-        yaxis=dict(title="Base 100", gridcolor="#1E1E3A"),
+        paper_bgcolor="#0A0B0E",
+        plot_bgcolor="#111318",
+        title=dict(
+            text="Evolução comparada (base 100)",
+            font=dict(size=15, color="#EFF1F5", family="Inter"),
+        ),
+        xaxis=dict(title="", gridcolor="#1A1F2B", ticklen=0, tickfont=dict(color="#5E6A7A")),
+        yaxis=dict(
+            title="Base 100", gridcolor="#1A1F2B",
+            ticklen=0, tickfont=dict(color="#5E6A7A"),
+        ),
         legend=dict(
             orientation="h",
             y=-0.30,
-            font=dict(size=9),
+            font=dict(size=9, color="#5E6A7A"),
             itemwidth=30,
             tracegroupgap=0,
         ),
         margin=dict(l=60, r=30, t=60, b=160),
         hovermode="x unified",
-        hoverlabel=dict(bgcolor="#1A1A2E", font_size=11),
+        hoverlabel=dict(
+            bgcolor="#111318", font_size=11,
+            font_family="Inter", bordercolor="#1E2330",
+        ),
     )
 
     grafico = dcc.Graph(figure=fig, style={"height": "600px"})
@@ -700,7 +819,7 @@ def _tab_evolucao(d):
     ] + [
         {
             "if": {"filter_query": f'{{Fundo}} = "{NOME_AWR}"'},
-            "backgroundColor": "#1E1A10",
+            "backgroundColor": "rgba(200,169,110,0.06)",
             "fontWeight": 700,
         }
     ]
@@ -708,26 +827,28 @@ def _tab_evolucao(d):
     tabela = dash_table.DataTable(
         columns=columns,
         data=data_records,
-        style_table={"overflowX": "auto", "marginTop": "24px"},
+        style_table={"overflowX": "auto", "marginTop": "24px", "borderRadius": "8px", "overflow": "hidden"},
         style_header={
-            "backgroundColor": "#0E0E0E",
+            "backgroundColor": "#0A0B0E",
             "color": COR_AWR,
             "fontWeight": 700,
-            "fontSize": "11px",
+            "fontSize": "10px",
             "textTransform": "uppercase",
-            "border": "1px solid #2A2A4A",
+            "letterSpacing": "0.8px",
+            "border": "1px solid #1E2330",
         },
         style_cell={
-            "backgroundColor": "#12122A",
-            "color": "#D0D0D0",
+            "backgroundColor": "#111318",
+            "color": "#EFF1F5",
             "fontSize": "12px",
-            "fontFamily": "'DM Mono', 'Roboto Mono', monospace",
-            "border": "1px solid #1E1E3A",
-            "padding": "6px 10px",
+            "fontFamily": "'JetBrains Mono', 'DM Mono', monospace",
+            "border": "1px solid #1A1F2B",
+            "padding": "7px 12px",
             "textAlign": "right",
         },
         style_cell_conditional=[
-            {"if": {"column_id": "Fundo"}, "textAlign": "left", "minWidth": "220px"},
+            {"if": {"column_id": "Fundo"}, "textAlign": "left", "minWidth": "220px",
+             "fontFamily": "'Inter', sans-serif"},
             {"if": {"column_id": "●"}, "textAlign": "center", "width": "30px", "padding": "2px"},
         ],
         style_data_conditional=style_data_cond,
@@ -737,9 +858,9 @@ def _tab_evolucao(d):
     titulo_tabela = html.Div(
         f"Cotas usadas no cálculo  ·  {data_ini_str} → {data_fim_str}",
         style={
-            "marginTop": "28px", "marginBottom": "6px",
-            "color": "#888", "fontSize": "12px",
-            "textTransform": "uppercase", "letterSpacing": "0.8px",
+            "marginTop": "28px", "marginBottom": "8px",
+            "color": "#5E6A7A", "fontSize": "11px",
+            "textTransform": "uppercase", "letterSpacing": "1px",
         },
     )
 
@@ -771,7 +892,8 @@ def _tab_distribuicao(d):
             value="Ret_acum",
             style={
                 "width": "300px", "marginBottom": "16px",
-                "backgroundColor": "#1A1A2E", "color": "#333",
+                "backgroundColor": "#111318", "color": "#333",
+                "border": "1px solid #1E2330",
             },
         ),
         dcc.Graph(id="dist-graph", style={"height": "500px"}),
@@ -803,7 +925,7 @@ def update_dist(metric_col, cache_key):
     fig.add_trace(go.Histogram(
         x=vals,
         nbinsx=max(8, int(len(vals) ** 0.5 * 2)),
-        marker=dict(color="#555", line=dict(color="#777", width=0.5)),
+        marker=dict(color="#1E2330", line=dict(color="#2A3040", width=0.5)),
         name="Peers",
         hovertemplate=f"{metric_col}: %{{x:.2{'%' if is_pct else 'f'}}}<br>N: %{{y}}<extra></extra>",
     ))
@@ -824,18 +946,27 @@ def update_dist(metric_col, cache_key):
 
     fig.update_layout(
         template="plotly_dark",
-        paper_bgcolor="#0D0D1A",
-        plot_bgcolor="#12122A",
-        title=dict(text=f"Distribuição — {label_map.get(metric_col, metric_col)}",
-                   font=dict(size=16, color="#E8E8E8")),
+        paper_bgcolor="#0A0B0E",
+        plot_bgcolor="#111318",
+        title=dict(
+            text=f"Distribuição — {label_map.get(metric_col, metric_col)}",
+            font=dict(size=15, color="#EFF1F5", family="Inter"),
+        ),
         xaxis=dict(
             title=label_map.get(metric_col, metric_col),
             tickformat=".1%" if is_pct else ".2f",
-            gridcolor="#1E1E3A",
+            gridcolor="#1A1F2B", ticklen=0, tickfont=dict(color="#5E6A7A"),
         ),
-        yaxis=dict(title="Nº de fundos", gridcolor="#1E1E3A"),
-        bargap=0.05,
+        yaxis=dict(
+            title="Nº de fundos", gridcolor="#1A1F2B",
+            ticklen=0, tickfont=dict(color="#5E6A7A"),
+        ),
+        bargap=0.06,
         margin=dict(l=60, r=30, t=60, b=60),
+        hoverlabel=dict(
+            bgcolor="#111318", font_size=12,
+            font_family="Inter", bordercolor="#1E2330",
+        ),
     )
 
     return fig
@@ -897,39 +1028,44 @@ def _tab_tabela(d):
             sort_action="native",
             filter_action="native",
             page_size=20,
-            style_table={"overflowX": "auto"},
+            style_table={
+                "overflowX": "auto",
+                "borderRadius": "8px",
+                "overflow": "hidden",
+            },
             style_header={
-                "backgroundColor": "#0E0E0E",
+                "backgroundColor": "#0A0B0E",
                 "color": COR_AWR,
                 "fontWeight": 700,
-                "fontSize": "11px",
+                "fontSize": "10px",
                 "textTransform": "uppercase",
-                "letterSpacing": "0.5px",
-                "border": "1px solid #2A2A4A",
+                "letterSpacing": "0.8px",
+                "border": "1px solid #1E2330",
             },
             style_cell={
-                "backgroundColor": "#12122A",
-                "color": "#D0D0D0",
+                "backgroundColor": "#111318",
+                "color": "#EFF1F5",
                 "fontSize": "12px",
-                "fontFamily": "'DM Mono', 'Roboto Mono', monospace",
-                "border": "1px solid #1E1E3A",
-                "padding": "8px 10px",
+                "fontFamily": "'JetBrains Mono', 'DM Mono', monospace",
+                "border": "1px solid #1A1F2B",
+                "padding": "9px 12px",
                 "textAlign": "right",
             },
             style_cell_conditional=[
-                {"if": {"column_id": "Fundo"}, "textAlign": "left", "minWidth": "200px"},
+                {"if": {"column_id": "Fundo"}, "textAlign": "left", "minWidth": "200px",
+                 "fontFamily": "'Inter', sans-serif"},
                 {"if": {"column_id": "★"}, "textAlign": "center", "width": "30px"},
             ],
             style_data_conditional=[
                 {
                     "if": {"filter_query": '{★} = "★"'},
-                    "backgroundColor": "#1E1A10",
+                    "backgroundColor": "rgba(200,169,110,0.06)",
                     "fontWeight": 700,
                 },
             ],
         ),
         html.Div(
-            style={"marginTop": "12px", "fontSize": "11px", "color": "#666"},
+            style={"marginTop": "12px", "fontSize": "11px", "color": "#5E6A7A"},
             children="Clique nos cabeçalhos para ordenar. Use os filtros para buscar.",
         ),
     ])
