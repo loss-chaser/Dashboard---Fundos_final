@@ -172,11 +172,26 @@ body {
 }
 .btn-refresh:hover { border-color: #C8A96E; color: #C8A96E; }
 
-.Select-control { background-color: #111318 !important; border-color: #1E2330 !important; }
-.Select-menu-outer { background-color: #111318 !important; border-color: #1E2330 !important; }
+/* React-Select v2 (Dash < 2.9) */
+.Select-control { background-color: #111318 !important; border-color: #1E2330 !important; border-radius: 6px !important; }
+.Select-control:hover { border-color: #2A3040 !important; }
+.Select-menu-outer { background-color: #111318 !important; border: 1px solid #1E2330 !important; border-radius: 6px !important; }
 .Select-option { background-color: #111318 !important; color: #EFF1F5 !important; }
-.Select-option:hover { background-color: #1E2330 !important; }
+.Select-option:hover, .Select-option.is-focused { background-color: #1E2330 !important; color: #EFF1F5 !important; }
+.Select-option.is-selected { background-color: rgba(200,169,110,0.12) !important; color: #C8A96E !important; }
 .Select-value-label { color: #EFF1F5 !important; }
+.Select-placeholder { color: #5E6A7A !important; }
+.Select-input input { color: #EFF1F5 !important; }
+/* React-Select v5 (Dash >= 2.9) */
+.Select__control { background-color: #111318 !important; border-color: #1E2330 !important; border-radius: 6px !important; }
+.Select__control:hover { border-color: #2A3040 !important; }
+.Select__menu { background-color: #111318 !important; border: 1px solid #1E2330 !important; border-radius: 6px !important; box-shadow: 0 8px 24px rgba(0,0,0,0.6) !important; }
+.Select__option { background-color: transparent !important; color: #EFF1F5 !important; }
+.Select__option:hover, .Select__option--is-focused { background-color: #1E2330 !important; color: #EFF1F5 !important; }
+.Select__option--is-selected { background-color: rgba(200,169,110,0.12) !important; color: #C8A96E !important; }
+.Select__single-value { color: #EFF1F5 !important; }
+.Select__placeholder { color: #5E6A7A !important; }
+.Select__input-container input { color: #EFF1F5 !important; }
 </style>
 </head>
 <body>
@@ -287,7 +302,7 @@ app.layout = html.Div(
                         html.Span(
                             id="periodo-display",
                             style={
-                                "color": "#5E6A7A", "fontSize": "11px",
+                                "color": "#EFF1F5", "fontSize": "11px",
                                 "marginLeft": "12px", "marginRight": "4px",
                                 "fontFamily": "'JetBrains Mono', monospace",
                                 "letterSpacing": "0.3px",
@@ -652,15 +667,25 @@ def update_tab(tab, cache_key):
 # TAB 1: RISCO × RETORNO
 # ─────────────────────────────────────────────────────────────────────────────
 def _tab_risco_retorno(d):
+    try:
+        return _tab_risco_retorno_inner(d)
+    except Exception as e:
+        log.error("Erro em _tab_risco_retorno: %s", e, exc_info=True)
+        return html.Div(f"Erro ao renderizar gráfico: {e}",
+                        style={"color": COR_NEGATIVO, "padding": "20px"})
+
+
+def _tab_risco_retorno_inner(d):
     m = d["metricas"]
     if m.empty:
-        return html.Div("Sem dados.", style={"color": "#666"})
+        return html.Div("Sem dados para o período.", style={"color": "#5E6A7A", "padding": "20px"})
 
     fig = go.Figure()
 
     # Peers
     pares = m[m["Fundo"] != NOME_AWR].copy()
     if not pares.empty:
+        pl_col = pares["PL"].fillna(0) if "PL" in pares.columns else pd.Series(0.0, index=pares.index)
         fig.add_trace(go.Scatter(
             x=pares["Vol_ann"],
             y=pares["Ret_ann"],
@@ -675,7 +700,7 @@ def _tab_risco_retorno(d):
             customdata=np.stack([
                 pares["Sharpe"].fillna(0),
                 pares["DD_max"].fillna(0),
-                pares["PL"].fillna(0),
+                pl_col,
             ], axis=-1),
             hovertemplate=(
                 "<b>%{text}</b><br>"
