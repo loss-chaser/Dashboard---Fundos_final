@@ -104,27 +104,79 @@ body {
 ::-webkit-scrollbar-thumb { background: #1E2330; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #2A3040; }
 
-.card-kpi {
-    transition: transform 0.18s ease, box-shadow 0.18s ease;
-}
-.card-kpi:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(0,0,0,0.45) !important;
-}
-.tab-modern .tab {
-    border-bottom: 2px solid transparent !important;
-    background: transparent !important;
+.card-kpi { transition: transform 0.18s ease, box-shadow 0.18s ease; }
+.card-kpi:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.45) !important; }
+
+/* ── Tab buttons ── */
+.tab-btn {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: #5E6A7A;
+    padding: 10px 22px;
+    font-size: 13px;
+    font-weight: 500;
+    font-family: 'Inter', sans-serif;
+    letter-spacing: 0.3px;
+    cursor: pointer;
     transition: color 0.15s ease, border-color 0.15s ease;
+    outline: none;
+    position: relative;
+    top: 1px;
 }
-.tab-modern .tab:hover { color: #C8A96E !important; }
+.tab-btn:hover { color: #C8A96E; }
+.tab-btn-active {
+    color: #C8A96E !important;
+    border-bottom: 2px solid #C8A96E !important;
+    font-weight: 700;
+}
+
+/* ── Period buttons ── */
+.periodo-btn {
+    background: transparent;
+    border: 1px solid #1E2330;
+    color: #5E6A7A;
+    padding: 5px 10px;
+    font-size: 11px;
+    font-family: 'Inter', sans-serif;
+    font-weight: 500;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    outline: none;
+    letter-spacing: 0.4px;
+}
+.periodo-btn:hover { border-color: #C8A96E; color: #EFF1F5; }
+.periodo-btn-active {
+    background: rgba(200,169,110,0.12) !important;
+    border-color: #C8A96E !important;
+    color: #C8A96E !important;
+    font-weight: 700;
+}
+
+/* ── Refresh button ── */
+.btn-refresh {
+    background: transparent;
+    border: 1px solid #1E2330;
+    color: #5E6A7A;
+    width: 30px;
+    height: 30px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    transition: all 0.15s ease;
+    outline: none;
+    margin-left: 6px;
+    padding: 0;
+}
+.btn-refresh:hover { border-color: #C8A96E; color: #C8A96E; }
 
 .Select-control { background-color: #111318 !important; border-color: #1E2330 !important; }
 .Select-menu-outer { background-color: #111318 !important; border-color: #1E2330 !important; }
 .Select-option { background-color: #111318 !important; color: #EFF1F5 !important; }
 .Select-option:hover { background-color: #1E2330 !important; }
 .Select-value-label { color: #EFF1F5 !important; }
-.DateInput_input { background: #111318 !important; color: #EFF1F5 !important; font-size: 12px !important; }
-.DateRangePickerInput { background: #111318 !important; border-color: #1E2330 !important; }
 </style>
 </head>
 <body>
@@ -138,30 +190,32 @@ body {
 </html>
 """
 
+# ─── Opções de período e abas ────────────────────────────────────────────────
+PERIODO_OPCOES = [
+    ("1M", "1m"), ("3M", "3m"), ("6M", "6m"),
+    ("YTD", "ytd"), ("1A", "1a"), ("2A", "2a"), ("MAX", "max"),
+]
+TAB_OPCOES = [
+    ("Risco × Retorno", "tab-risco-retorno"),
+    ("Evolução",        "tab-evolucao"),
+    ("Distribuição",    "tab-distribuicao"),
+    ("Tabela Completa", "tab-tabela"),
+]
+_DEFAULT_PERIODO = "1a"
+_DEFAULT_TAB     = "tab-risco-retorno"
 
-def _tab_style():
-    return {
-        "backgroundColor": "transparent",
-        "color": "#5E6A7A",
-        "border": "none",
-        "borderBottom": "2px solid transparent",
-        "padding": "10px 22px",
-        "fontSize": "13px",
-        "fontWeight": 500,
-        "letterSpacing": "0.3px",
-    }
 
-def _tab_selected():
-    return {
-        "backgroundColor": "transparent",
-        "color": COR_AWR,
-        "border": "none",
-        "borderBottom": f"2px solid {COR_AWR}",
-        "padding": "10px 22px",
-        "fontSize": "13px",
-        "fontWeight": 700,
-        "letterSpacing": "0.3px",
-    }
+def _datas_para_periodo(periodo: str) -> tuple[date, date]:
+    hoje = date.today()
+    if periodo == "1m":   return hoje - timedelta(days=30),   hoje
+    if periodo == "3m":   return hoje - timedelta(days=91),   hoje
+    if periodo == "6m":   return hoje - timedelta(days=182),  hoje
+    if periodo == "ytd":  return date(hoje.year, 1, 1),       hoje
+    if periodo == "2a":   return hoje - timedelta(days=730),  hoje
+    if periodo == "max":  return date(2020, 1, 1),            hoje
+    return hoje - timedelta(days=365), hoje  # 1a (default)
+
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -181,7 +235,7 @@ app.layout = html.Div(
                 "background": "#0A0B0E",
                 "borderTop": f"3px solid {COR_AWR}",
                 "borderBottom": "1px solid #1E2330",
-                "padding": "16px 36px",
+                "padding": "14px 36px",
                 "display": "flex",
                 "alignItems": "center",
                 "justifyContent": "space-between",
@@ -191,6 +245,7 @@ app.layout = html.Div(
                 "backdropFilter": "blur(8px)",
             },
             children=[
+                # Logo
                 html.Div(
                     style={"display": "flex", "alignItems": "baseline", "gap": "10px"},
                     children=[
@@ -202,76 +257,70 @@ app.layout = html.Div(
                             "fontSize": "20px", "fontWeight": 300,
                             "color": "#EFF1F5", "letterSpacing": "3px",
                         }),
-                        html.Span("·", style={"color": "#1E2330", "fontSize": "18px", "margin": "0 4px"}),
+                        html.Span("·", style={
+                            "color": "#1E2330", "fontSize": "18px", "margin": "0 4px",
+                        }),
                         html.Span("Comparador", style={
                             "fontSize": "13px", "color": "#5E6A7A",
                             "fontWeight": 400, "letterSpacing": "0.5px",
                         }),
                     ],
                 ),
-                html.Div([
-                    html.Label("Período", style={
-                        "color": "#5E6A7A", "fontSize": "11px",
-                        "marginRight": "8px", "textTransform": "uppercase",
-                        "letterSpacing": "0.8px",
-                    }),
-                    dcc.DatePickerRange(
-                        id="date-range",
-                        min_date_allowed=date(2020, 1, 1),
-                        max_date_allowed=date.today(),
-                        start_date=date(2024, 1, 1),
-                        end_date=date.today(),
-                        display_format="DD/MM/YYYY",
-                        style={"fontSize": "12px"},
-                    ),
-                    html.Button(
-                        "Atualizar",
-                        id="btn-refresh",
-                        n_clicks=0,
-                        style={
-                            "marginLeft": "12px",
-                            "padding": "8px 22px",
-                            "backgroundColor": COR_AWR,
-                            "color": "#0A0B0E",
-                            "border": "none",
-                            "borderRadius": "5px",
-                            "fontWeight": 700,
-                            "cursor": "pointer",
-                            "fontSize": "12px",
-                            "letterSpacing": "0.8px",
-                            "textTransform": "uppercase",
-                        },
-                    ),
-                ], style={"display": "flex", "alignItems": "center"}),
+                # Seletor de período
+                html.Div(
+                    style={"display": "flex", "alignItems": "center", "gap": "4px"},
+                    children=[
+                        html.Span("PERÍODO", style={
+                            "color": "#5E6A7A", "fontSize": "10px",
+                            "letterSpacing": "0.8px", "textTransform": "uppercase",
+                            "marginRight": "6px",
+                        }),
+                        *[
+                            html.Button(
+                                lbl,
+                                id=f"btn-periodo-{key}",
+                                n_clicks=0,
+                                className="periodo-btn periodo-btn-active" if key == _DEFAULT_PERIODO else "periodo-btn",
+                            )
+                            for lbl, key in PERIODO_OPCOES
+                        ],
+                        html.Span(
+                            id="periodo-display",
+                            style={
+                                "color": "#5E6A7A", "fontSize": "11px",
+                                "marginLeft": "12px", "marginRight": "4px",
+                                "fontFamily": "'JetBrains Mono', monospace",
+                                "letterSpacing": "0.3px",
+                            },
+                        ),
+                        html.Button("↻", id="btn-refresh", n_clicks=0, className="btn-refresh", title="Atualizar dados"),
+                    ],
+                ),
             ],
         ),
 
         # ── Cards resumo ──
         html.Div(id="cards-resumo", style={"padding": "24px 36px 8px"}),
 
-        # ── Tabs ──
-        dcc.Tabs(
-            id="tabs",
-            value="tab-risco-retorno",
-            style={"padding": "0 36px", "borderBottom": "1px solid #1E2330"},
-            colors={
-                "border": "transparent",
-                "primary": COR_AWR,
-                "background": "transparent",
+        # ── Barra de abas customizada ──
+        html.Div(
+            style={
+                "display": "flex",
+                "padding": "0 36px",
+                "borderBottom": "1px solid #1E2330",
             },
             children=[
-                dcc.Tab(label="Risco × Retorno", value="tab-risco-retorno",
-                        style=_tab_style(), selected_style=_tab_selected()),
-                dcc.Tab(label="Evolução", value="tab-evolucao",
-                        style=_tab_style(), selected_style=_tab_selected()),
-                dcc.Tab(label="Distribuição", value="tab-distribuicao",
-                        style=_tab_style(), selected_style=_tab_selected()),
-                dcc.Tab(label="Tabela Completa", value="tab-tabela",
-                        style=_tab_style(), selected_style=_tab_selected()),
+                html.Button(
+                    lbl,
+                    id=f"btn-tab-{key.replace('tab-', '')}",
+                    n_clicks=0,
+                    className="tab-btn tab-btn-active" if key == _DEFAULT_TAB else "tab-btn",
+                )
+                for lbl, key in TAB_OPCOES
             ],
         ),
 
-        # ── Loading (só no conteúdo, não nas abas) ──
+        # ── Conteúdo das abas ──
         dcc.Loading(
             id="loading",
             type="dot",
@@ -281,8 +330,10 @@ app.layout = html.Div(
             ],
         ),
 
-        # ── Store para dados ──
+        # ── Stores ──
         dcc.Store(id="store-data"),
+        dcc.Store(id="active-tab",          data=_DEFAULT_TAB),
+        dcc.Store(id="periodo-selecionado", data=_DEFAULT_PERIODO),
 
         # ── Footer ──
         html.Div(
@@ -388,40 +439,72 @@ inicializar_global()
 # _DEFAULT_KEY calculado dinamicamente no callback — não congela a data no startup
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# CALLBACK: SELETOR DE PERÍODO
+# ─────────────────────────────────────────────────────────────────────────────
 @app.callback(
-    Output("date-range", "max_date_allowed"),
-    Output("date-range", "end_date"),
-    Input("btn-refresh", "n_clicks"),
+    Output("periodo-selecionado", "data"),
+    Output("periodo-display", "children"),
+    *[Output(f"btn-periodo-{key}", "className") for _, key in PERIODO_OPCOES],
+    *[Input(f"btn-periodo-{key}", "n_clicks") for _, key in PERIODO_OPCOES],
 )
-def atualizar_data_maxima(n_clicks):
-    """Atualiza o limite máximo e end_date do DatePicker para sempre refletir hoje."""
-    hoje = date.today()
-    return hoje, hoje
+def mudar_periodo(*_):
+    triggered = callback_context.triggered
+    periodo = _DEFAULT_PERIODO
+    if triggered and triggered[0]["prop_id"] != ".":
+        tid = triggered[0]["prop_id"].split(".")[0]
+        for _, key in PERIODO_OPCOES:
+            if tid == f"btn-periodo-{key}":
+                periodo = key
+                break
+
+    sd, ed = _datas_para_periodo(periodo)
+    display = f"{sd.strftime('%d/%m/%Y')} → {ed.strftime('%d/%m/%Y')}"
+    classnames = [
+        "periodo-btn periodo-btn-active" if key == periodo else "periodo-btn"
+        for _, key in PERIODO_OPCOES
+    ]
+    return periodo, display, *classnames
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# CALLBACK: TROCA DE ABA
+# ─────────────────────────────────────────────────────────────────────────────
+@app.callback(
+    Output("active-tab", "data"),
+    *[Output(f"btn-tab-{key.replace('tab-','')}", "className") for _, key in TAB_OPCOES],
+    *[Input(f"btn-tab-{key.replace('tab-','')}", "n_clicks") for _, key in TAB_OPCOES],
+)
+def mudar_tab(*_):
+    triggered = callback_context.triggered
+    tab = _DEFAULT_TAB
+    if triggered and triggered[0]["prop_id"] != ".":
+        tid = triggered[0]["prop_id"].split(".")[0]
+        for _, key in TAB_OPCOES:
+            if tid == f"btn-tab-{key.replace('tab-','')}":
+                tab = key
+                break
+
+    classnames = [
+        "tab-btn tab-btn-active" if key == tab else "tab-btn"
+        for _, key in TAB_OPCOES
+    ]
+    return tab, *classnames
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CALLBACK: CARREGAR DADOS
+# ─────────────────────────────────────────────────────────────────────────────
 @app.callback(
     Output("store-data", "data"),
     Input("btn-refresh", "n_clicks"),
-    Input("date-range", "start_date"),
-    Input("date-range", "end_date"),
+    Input("periodo-selecionado", "data"),
 )
-def load_data(n_clicks, start_date, end_date):
-    # Sempre recalcula "hoje" na hora do callback — nunca congela a data
+def load_data(n_clicks, periodo):
     hoje = date.today()
-
-    if start_date is None or end_date is None:
-        return _build_cache(hoje - timedelta(days=365), hoje)
-
-    sd = date.fromisoformat(start_date[:10])
-    ed = date.fromisoformat(end_date[:10])
-
-    # Se end_date veio do DatePicker mas já é dia anterior, força hoje
-    if ed < hoje:
-        ed = hoje
-
+    sd, ed = _datas_para_periodo(periodo or _DEFAULT_PERIODO)
     cache_key = f"{sd}_{ed}"
 
-    # Usa cache se já temos e não foi clique em Atualizar
     triggered = callback_context.triggered
     is_refresh = any("btn-refresh" in t["prop_id"] for t in triggered)
     if cache_key in _CACHE and not is_refresh:
@@ -545,7 +628,7 @@ def update_cards(cache_key):
 # ─────────────────────────────────────────────────────────────────────────────
 @app.callback(
     Output("tab-content", "children"),
-    Input("tabs", "value"),
+    Input("active-tab", "data"),
     Input("store-data", "data"),
 )
 def update_tab(tab, cache_key):
