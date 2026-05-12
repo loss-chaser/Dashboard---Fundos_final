@@ -135,7 +135,7 @@ body {
 .periodo-btn {
     background: transparent;
     border: 1px solid #1E2330;
-    color: #5E6A7A;
+    color: #9AA5B4;
     padding: 5px 10px;
     font-size: 11px;
     font-family: 'Inter', sans-serif;
@@ -148,6 +148,29 @@ body {
 }
 .periodo-btn:hover { border-color: #C8A96E; color: #EFF1F5; }
 .periodo-btn-active {
+    background: rgba(200,169,110,0.12) !important;
+    border-color: #C8A96E !important;
+    color: #C8A96E !important;
+    font-weight: 700;
+}
+
+/* ── Metric selector buttons ── */
+.metric-btn {
+    background: transparent;
+    border: 1px solid #1E2330;
+    color: #9AA5B4;
+    padding: 6px 14px;
+    font-size: 12px;
+    font-family: 'Inter', sans-serif;
+    font-weight: 500;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    outline: none;
+    white-space: nowrap;
+}
+.metric-btn:hover { border-color: #C8A96E; color: #EFF1F5; }
+.metric-btn-active {
     background: rgba(200,169,110,0.12) !important;
     border-color: #C8A96E !important;
     color: #C8A96E !important;
@@ -172,26 +195,6 @@ body {
 }
 .btn-refresh:hover { border-color: #C8A96E; color: #C8A96E; }
 
-/* React-Select v2 (Dash < 2.9) */
-.Select-control { background-color: #111318 !important; border-color: #1E2330 !important; border-radius: 6px !important; }
-.Select-control:hover { border-color: #2A3040 !important; }
-.Select-menu-outer { background-color: #111318 !important; border: 1px solid #1E2330 !important; border-radius: 6px !important; }
-.Select-option { background-color: #111318 !important; color: #EFF1F5 !important; }
-.Select-option:hover, .Select-option.is-focused { background-color: #1E2330 !important; color: #EFF1F5 !important; }
-.Select-option.is-selected { background-color: rgba(200,169,110,0.12) !important; color: #C8A96E !important; }
-.Select-value-label { color: #EFF1F5 !important; }
-.Select-placeholder { color: #5E6A7A !important; }
-.Select-input input { color: #EFF1F5 !important; }
-/* React-Select v5 (Dash >= 2.9) */
-.Select__control { background-color: #111318 !important; border-color: #1E2330 !important; border-radius: 6px !important; }
-.Select__control:hover { border-color: #2A3040 !important; }
-.Select__menu { background-color: #111318 !important; border: 1px solid #1E2330 !important; border-radius: 6px !important; box-shadow: 0 8px 24px rgba(0,0,0,0.6) !important; }
-.Select__option { background-color: transparent !important; color: #EFF1F5 !important; }
-.Select__option:hover, .Select__option--is-focused { background-color: #1E2330 !important; color: #EFF1F5 !important; }
-.Select__option--is-selected { background-color: rgba(200,169,110,0.12) !important; color: #C8A96E !important; }
-.Select__single-value { color: #EFF1F5 !important; }
-.Select__placeholder { color: #5E6A7A !important; }
-.Select__input-container input { color: #EFF1F5 !important; }
 </style>
 </head>
 <body>
@@ -216,8 +219,18 @@ TAB_OPCOES = [
     ("Distribuição",    "tab-distribuicao"),
     ("Tabela Completa", "tab-tabela"),
 ]
+METRIC_OPCOES = [
+    ("Ret. Acum.",  "Ret_acum"),
+    ("Ret. Ann.",   "Ret_ann"),
+    ("Volatilidade","Vol_ann"),
+    ("Sharpe",      "Sharpe"),
+    ("Sortino",     "Sortino"),
+    ("Drawdown",    "DD_max"),
+    ("% Meses +",   "Pct_meses_pos"),
+]
 _DEFAULT_PERIODO = "1a"
 _DEFAULT_TAB     = "tab-risco-retorno"
+_DEFAULT_METRIC  = "Ret_acum"
 
 
 def _datas_para_periodo(periodo: str) -> tuple[date, date]:
@@ -349,6 +362,7 @@ app.layout = html.Div(
         dcc.Store(id="store-data"),
         dcc.Store(id="active-tab",          data=_DEFAULT_TAB),
         dcc.Store(id="periodo-selecionado", data=_DEFAULT_PERIODO),
+        dcc.Store(id="dist-metric",         data=_DEFAULT_METRIC),
 
         # ── Footer ──
         html.Div(
@@ -645,10 +659,11 @@ def update_cards(cache_key):
     Output("tab-content", "children"),
     Input("active-tab", "data"),
     Input("store-data", "data"),
+    State("dist-metric", "data"),
 )
-def update_tab(tab, cache_key):
+def update_tab(tab, cache_key, dist_metric):
     if not cache_key or cache_key not in _CACHE:
-        return html.Div("Selecione período e clique em Atualizar.", style={"color": "#666"})
+        return html.Div("Carregando...", style={"color": "#5E6A7A", "padding": "20px"})
 
     d = _CACHE[cache_key]
 
@@ -657,7 +672,7 @@ def update_tab(tab, cache_key):
     elif tab == "tab-evolucao":
         return _tab_evolucao(d)
     elif tab == "tab-distribuicao":
-        return _tab_distribuicao(d)
+        return _tab_distribuicao(d, dist_metric or _DEFAULT_METRIC)
     elif tab == "tab-tabela":
         return _tab_tabela(d)
     return html.Div()
@@ -694,7 +709,6 @@ def _tab_risco_retorno_inner(d):
                 size=9,
                 color=COR_OUTROS,
                 opacity=0.55,
-                line=dict(width=0, color="transparent"),
             ),
             text=pares["Fundo"],
             customdata=np.stack([
@@ -978,42 +992,59 @@ def _tab_evolucao(d):
 # ─────────────────────────────────────────────────────────────────────────────
 # TAB 3: DISTRIBUIÇÃO (histograma)
 # ─────────────────────────────────────────────────────────────────────────────
-def _tab_distribuicao(d):
+def _tab_distribuicao(d, current_metric=_DEFAULT_METRIC):
     m = d["metricas"]
     if m.empty:
-        return html.Div("Sem dados.", style={"color": "#666"})
-
-    metric_options = [
-        {"label": "Retorno acumulado", "value": "Ret_acum"},
-        {"label": "Retorno anualizado", "value": "Ret_ann"},
-        {"label": "Volatilidade ann.", "value": "Vol_ann"},
-        {"label": "Sharpe", "value": "Sharpe"},
-        {"label": "Sortino", "value": "Sortino"},
-        {"label": "Drawdown máximo", "value": "DD_max"},
-        {"label": "% meses positivos", "value": "Pct_meses_pos"},
-    ]
+        return html.Div("Sem dados.", style={"color": "#5E6A7A", "padding": "20px"})
 
     return html.Div([
-        dcc.Dropdown(
-            id="dist-metric",
-            options=metric_options,
-            value="Ret_acum",
-            style={
-                "width": "300px", "marginBottom": "16px",
-                "backgroundColor": "#111318", "color": "#333",
-                "border": "1px solid #1E2330",
-            },
+        html.Div(
+            style={"display": "flex", "gap": "6px", "marginBottom": "20px", "flexWrap": "wrap"},
+            children=[
+                html.Button(
+                    lbl,
+                    id=f"btn-metric-{key}",
+                    n_clicks=0,
+                    className="metric-btn metric-btn-active" if key == current_metric else "metric-btn",
+                )
+                for lbl, key in METRIC_OPCOES
+            ],
         ),
         dcc.Graph(id="dist-graph", style={"height": "500px"}),
     ])
 
 
 @app.callback(
-    Output("dist-graph", "figure"),
-    Input("dist-metric", "value"),
-    Input("store-data", "data"),
+    Output("dist-metric", "data"),
+    *[Output(f"btn-metric-{key}", "className") for _, key in METRIC_OPCOES],
+    *[Input(f"btn-metric-{key}", "n_clicks") for _, key in METRIC_OPCOES],
+    prevent_initial_call=True,
 )
-def update_dist(metric_col, cache_key):
+def mudar_metrica(*_):
+    triggered = callback_context.triggered
+    metric = _DEFAULT_METRIC
+    if triggered and triggered[0]["prop_id"] != ".":
+        tid = triggered[0]["prop_id"].split(".")[0]
+        for _, key in METRIC_OPCOES:
+            if tid == f"btn-metric-{key}":
+                metric = key
+                break
+    classnames = [
+        "metric-btn metric-btn-active" if key == metric else "metric-btn"
+        for _, key in METRIC_OPCOES
+    ]
+    return metric, *classnames
+
+
+@app.callback(
+    Output("dist-graph", "figure"),
+    Input("dist-metric", "data"),
+    Input("store-data", "data"),
+    Input("active-tab", "data"),
+)
+def update_dist(metric_col, cache_key, active_tab):
+    if active_tab != "tab-distribuicao":
+        return go.Figure()
     if not cache_key or cache_key not in _CACHE or not metric_col:
         return go.Figure()
 
