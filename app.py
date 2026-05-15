@@ -839,6 +839,7 @@ def _tab_evolucao(d):
             opacity=0.8,
             name=col,
             showlegend=True,
+            hoverlabel=dict(bgcolor="#111318", bordercolor=cor, font_color=cor, font_size=12, font_family="Inter"),
             hovertemplate=f"<b>{col}</b><br>%{{x|%d/%m/%Y}}<br>Base 100: %{{y:.2f}}<extra></extra>",
         ))
 
@@ -850,6 +851,7 @@ def _tab_evolucao(d):
             mode="lines",
             line=dict(color=COR_CDI, width=2, dash="dot"),
             name="CDI",
+            hoverlabel=dict(bgcolor="#111318", bordercolor=COR_CDI, font_color=COR_CDI, font_size=12, font_family="Inter"),
             hovertemplate="<b>CDI</b><br>%{x|%d/%m/%Y}<br>Base 100: %{y:.2f}<extra></extra>",
         ))
 
@@ -860,6 +862,7 @@ def _tab_evolucao(d):
             mode="lines",
             line=dict(color=COR_IBOV, width=2, dash="dash"),
             name="Ibovespa",
+            hoverlabel=dict(bgcolor="#111318", bordercolor=COR_IBOV, font_color=COR_IBOV, font_size=12, font_family="Inter"),
             hovertemplate="<b>Ibovespa</b><br>%{x|%d/%m/%Y}<br>Base 100: %{y:.2f}<extra></extra>",
         ))
 
@@ -870,6 +873,7 @@ def _tab_evolucao(d):
             mode="lines",
             line=dict(color=COR_AWR, width=3.5),
             name=NOME_AWR,
+            hoverlabel=dict(bgcolor="#111318", bordercolor=COR_AWR, font_color=COR_AWR, font_size=12, font_family="Inter"),
             hovertemplate=f"<b>{NOME_AWR}</b><br>%{{x|%d/%m/%Y}}<br>Base 100: %{{y:.2f}}<extra></extra>",
         ))
 
