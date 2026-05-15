@@ -34,7 +34,7 @@ from config import (
     COR_AWR, COR_AWR_BG, COR_IBOV, COR_CDI, COR_OUTROS,
     COR_POSITIVO, COR_NEGATIVO, DIAS_UTEIS_ANO, CORES_FUNDOS,
 )
-from data_loader import inicializar_global, filtrar_periodo
+from data_loader import inicializar_global, filtrar_periodo, get_awr_inicio
 from metrics import (
     retornos_diarios, retorno_acumulado, retorno_anualizado,
     vol_anualizada, sharpe, max_drawdown, cota_base_100,
@@ -240,7 +240,9 @@ def _datas_para_periodo(periodo: str) -> tuple[date, date]:
     if periodo == "6m":   return hoje - timedelta(days=182),  hoje
     if periodo == "ytd":  return date(hoje.year, 1, 1),       hoje
     if periodo == "2a":   return hoje - timedelta(days=730),  hoje
-    if periodo == "max":  return date(2020, 1, 1),            hoje
+    if periodo == "max":
+        awr_inicio = get_awr_inicio()
+        return (awr_inicio or date(2020, 1, 1)), hoje
     return hoje - timedelta(days=365), hoje  # 1a (default)
 
 
@@ -892,10 +894,11 @@ def _tab_evolucao(d):
             tracegroupgap=0,
         ),
         margin=dict(l=60, r=30, t=60, b=160),
-        hovermode="x unified",
+        hovermode="closest",
         hoverlabel=dict(
-            bgcolor="#111318", font_size=11,
+            bgcolor="#111318", font_size=12,
             font_family="Inter", bordercolor="#1E2330",
+            namelength=-1,
         ),
     )
 
@@ -1114,58 +1117,113 @@ def update_dist(metric_col, cache_key, active_tab):
 # ─────────────────────────────────────────────────────────────────────────────
 # TAB 4: TABELA COMPLETA
 # ─────────────────────────────────────────────────────────────────────────────
+_COL_LABELS = {
+    "#": "#", "★": "★", "Fundo": "Fundo", "N_obs": "N obs",
+    "Ret_acum": "Ret. Acum.", "Ret_ann": "Ret. Ann.",
+    "Vol_ann": "Vol. Ann.", "Sharpe": "Sharpe", "Sortino": "Sortino",
+    "DD_max": "DD Máx.", "Pct_meses_pos": "% Meses +",
+    "Pct_do_CDI": "% do CDI", "Pct_meses_vs_CDI": "% M > CDI",
+    "Pct_meses_vs_Ibov": "% M > Ibov", "TE_Ibov": "TE Ibov",
+    "IR_Ibov": "IR Ibov", "PL": "Patrimônio",
+}
+
+_FMT_MAP = {
+    "Ret_acum": lambda v: fmt_pct(v, 2),
+    "Ret_ann": lambda v: fmt_pct(v),
+    "Vol_ann": lambda v: fmt_pct(v),
+    "Sharpe": lambda v: fmt_num(v),
+    "Sortino": lambda v: fmt_num(v),
+    "DD_max": lambda v: fmt_pct(v),
+    "Pct_meses_pos": lambda v: fmt_pct(v, 0),
+    "Pct_do_CDI": lambda v: fmt_pct(v, 0),
+    "Pct_meses_vs_CDI": lambda v: fmt_pct(v, 0),
+    "Pct_meses_vs_Ibov": lambda v: fmt_pct(v, 0),
+    "TE_Ibov": lambda v: fmt_pct(v),
+    "IR_Ibov": lambda v: fmt_num(v),
+    "PL": lambda v: fmt_pl(v),
+}
+
+
+def _build_tabela_records(m: pd.DataFrame) -> list[dict]:
+    """Ordena por retorno, adiciona ranking e formata colunas."""
+    display = m.copy()
+    if "Ret_acum" in display.columns:
+        display = display.sort_values("Ret_acum", ascending=False, na_position="last").reset_index(drop=True)
+    display.insert(0, "#", range(1, len(display) + 1))
+    display.insert(1, "★", display["Fundo"].apply(lambda x: "★" if x == NOME_AWR else ""))
+    for col, fn in _FMT_MAP.items():
+        if col in display.columns:
+            display[col] = display[col].apply(fn)
+    return display.to_dict("records")
+
+
+def _tabela_columns(m: pd.DataFrame) -> list[dict]:
+    display = m.copy()
+    display.insert(0, "#", 0)
+    display.insert(1, "★", "")
+    return [{"name": _COL_LABELS.get(c, c), "id": c} for c in display.columns]
+
+
+def _tabela_style_data_cond():
+    return [
+        {
+            "if": {"filter_query": '{★} = "★"'},
+            "backgroundColor": "rgba(200,169,110,0.06)",
+            "fontWeight": 700,
+        },
+    ]
+
+
 def _tab_tabela(d):
     m = d["metricas"]
     if m.empty:
         return html.Div("Sem dados.", style={"color": "#666"})
 
-    # Formata para exibição
-    display = m.copy()
-    display.insert(0, "★", display["Fundo"].apply(lambda x: "★" if x == NOME_AWR else ""))
-
-    # Formata colunas
-    fmt_map = {
-        "Ret_acum": lambda v: fmt_pct(v, 2),
-        "Ret_ann": lambda v: fmt_pct(v),
-        "Vol_ann": lambda v: fmt_pct(v),
-        "Sharpe": lambda v: fmt_num(v),
-        "Sortino": lambda v: fmt_num(v),
-        "DD_max": lambda v: fmt_pct(v),
-        "Pct_meses_pos": lambda v: fmt_pct(v, 0),
-        "Pct_do_CDI": lambda v: fmt_pct(v, 0),
-        "Pct_meses_vs_CDI": lambda v: fmt_pct(v, 0),
-        "Pct_meses_vs_Ibov": lambda v: fmt_pct(v, 0),
-        "TE_Ibov": lambda v: fmt_pct(v),
-        "IR_Ibov": lambda v: fmt_num(v),
-        "PL": lambda v: fmt_pl(v),
-    }
-
-    for col, fn in fmt_map.items():
-        if col in display.columns:
-            display[col] = display[col].apply(fn)
-
-    col_labels = {
-        "★": "★", "Fundo": "Fundo", "N_obs": "N obs",
-        "Ret_acum": "Ret. Acum.", "Ret_ann": "Ret. Ann.",
-        "Vol_ann": "Vol. Ann.", "Sharpe": "Sharpe", "Sortino": "Sortino",
-        "DD_max": "DD Máx.", "Pct_meses_pos": "% Meses +",
-        "Pct_do_CDI": "% do CDI", "Pct_meses_vs_CDI": "% M > CDI",
-        "Pct_meses_vs_Ibov": "% M > Ibov", "TE_Ibov": "TE Ibov",
-        "IR_Ibov": "IR Ibov", "PL": "Patrimônio",
-    }
-
-    columns = [
-        {"name": col_labels.get(c, c), "id": c}
-        for c in display.columns
-    ]
+    records = _build_tabela_records(m)
+    columns = _tabela_columns(m)
 
     return html.Div([
+        # ── Barra de busca ──
+        html.Div(
+            style={
+                "display": "flex", "alignItems": "center", "gap": "10px",
+                "marginBottom": "14px",
+            },
+            children=[
+                html.Span("🔍", style={"color": "#5E6A7A", "fontSize": "13px"}),
+                dcc.Input(
+                    id="search-tabela",
+                    type="text",
+                    placeholder="Buscar fundo pelo nome…",
+                    debounce=True,
+                    style={
+                        "backgroundColor": "#111318",
+                        "border": "1px solid #1E2330",
+                        "borderRadius": "5px",
+                        "color": "#EFF1F5",
+                        "padding": "7px 14px",
+                        "fontSize": "12px",
+                        "fontFamily": "'Inter', sans-serif",
+                        "width": "300px",
+                        "outline": "none",
+                        "letterSpacing": "0.2px",
+                    },
+                ),
+                html.Span(
+                    "Pressione Enter para filtrar · clique nos cabeçalhos para ordenar",
+                    style={
+                        "color": "#2A3040", "fontSize": "10px",
+                        "letterSpacing": "0.5px",
+                    },
+                ),
+            ],
+        ),
+        # ── DataTable ──
         dash_table.DataTable(
             id="tabela-fundos",
             columns=columns,
-            data=display.to_dict("records"),
+            data=records,
             sort_action="native",
-            filter_action="native",
             page_size=20,
             style_table={
                 "overflowX": "auto",
@@ -1189,25 +1247,33 @@ def _tab_tabela(d):
                 "border": "1px solid #1A1F2B",
                 "padding": "9px 12px",
                 "textAlign": "right",
+                "whiteSpace": "normal",
             },
             style_cell_conditional=[
                 {"if": {"column_id": "Fundo"}, "textAlign": "left", "minWidth": "200px",
                  "fontFamily": "'Inter', sans-serif"},
-                {"if": {"column_id": "★"}, "textAlign": "center", "width": "30px"},
+                {"if": {"column_id": "★"}, "textAlign": "center", "width": "28px", "padding": "2px 4px"},
+                {"if": {"column_id": "#"}, "textAlign": "center", "width": "38px",
+                 "color": "#5E6A7A", "fontWeight": 600, "padding": "2px 4px"},
             ],
-            style_data_conditional=[
-                {
-                    "if": {"filter_query": '{★} = "★"'},
-                    "backgroundColor": "rgba(200,169,110,0.06)",
-                    "fontWeight": 700,
-                },
-            ],
-        ),
-        html.Div(
-            style={"marginTop": "12px", "fontSize": "11px", "color": "#5E6A7A"},
-            children="Clique nos cabeçalhos para ordenar. Use os filtros para buscar.",
+            style_data_conditional=_tabela_style_data_cond(),
         ),
     ])
+
+
+@app.callback(
+    Output("tabela-fundos", "data"),
+    Input("search-tabela", "value"),
+    State("store-data", "data"),
+    prevent_initial_call=True,
+)
+def filtrar_tabela(search, cache_key):
+    if not cache_key or cache_key not in _CACHE:
+        return []
+    m = _CACHE[cache_key]["metricas"]
+    if search:
+        m = m[m["Fundo"].str.contains(search, case=False, na=False)]
+    return _build_tabela_records(m)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

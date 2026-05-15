@@ -104,6 +104,19 @@ def inicializar_global(data_min: date | None = None) -> None:
     }
 
 
+def get_awr_inicio() -> "date | None":
+    """Retorna a data da primeira cota disponível do fundo AWR."""
+    if not _GLOBAL_RAW:
+        return None
+    df = _GLOBAL_RAW.get("df_cotas")
+    if df is None or NOME_AWR not in df.columns:
+        return None
+    serie = df[NOME_AWR].dropna()
+    if serie.empty:
+        return None
+    return serie.index[0].date()
+
+
 def filtrar_periodo(data_busca: date, data_fim: date) -> dict:
     """
     Filtra o dataset global pela janela [data_busca, data_fim].
