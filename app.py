@@ -195,6 +195,56 @@ body {
 }
 .btn-refresh:hover { border-color: #C8A96E; color: #C8A96E; }
 
+/* ── DataTable polish ── */
+.dash-table-container { border-radius: 10px; border: 1px solid #15191F; }
+.dash-spreadsheet-inner td.dash-cell, .dash-spreadsheet-inner th.dash-header { outline: none !important; }
+.dash-spreadsheet-inner tbody tr { transition: background-color .12s ease; }
+.dash-spreadsheet-inner tbody tr:hover td.dash-cell { background-color: rgba(200,169,110,0.06) !important; }
+
+/* ── dcc.Dropdown (tema escuro) ── */
+.corr-dd .Select-control,
+.corr-dd .Select.is-open > .Select-control,
+.corr-dd .Select.is-focused:not(.is-open) > .Select-control {
+    background-color: #111318 !important;
+    border: 1px solid #1E2330 !important;
+    border-radius: 6px !important;
+    box-shadow: none !important;
+    min-height: 40px;
+}
+.corr-dd .Select-placeholder { color: #5E6A7A !important; }
+.corr-dd .Select-input > input { color: #EFF1F5 !important; }
+.corr-dd .Select-menu-outer {
+    background-color: #111318 !important;
+    border: 1px solid #1E2330 !important;
+    border-radius: 6px !important;
+    margin-top: 4px;
+}
+.corr-dd .VirtualizedSelectOption, .corr-dd .Select-option {
+    background-color: #111318 !important; color: #C7CDD8 !important;
+}
+.corr-dd .VirtualizedSelectFocusedOption, .corr-dd .Select-option.is-focused {
+    background-color: #1A1F2B !important; color: #EFF1F5 !important;
+}
+.corr-dd .Select--multi .Select-value {
+    background-color: rgba(200,169,110,0.14) !important;
+    border: 1px solid rgba(200,169,110,0.45) !important;
+    color: #D9BE86 !important;
+    border-radius: 5px !important;
+    margin: 4px 4px 0 0 !important;
+    font-size: 11.5px;
+    display: inline-flex; align-items: center;
+}
+.corr-dd .Select--multi .Select-value-icon {
+    border-right: 1px solid rgba(200,169,110,0.3) !important;
+    padding: 1px 7px 0 !important;
+}
+.corr-dd .Select--multi .Select-value-icon:hover {
+    background-color: rgba(200,169,110,0.28) !important; color: #fff !important;
+}
+.corr-dd .Select-arrow { border-color: #5E6A7A transparent transparent !important; }
+.corr-dd .Select-clear-zone:hover .Select-clear { color: #E74C3C !important; }
+.corr-dd .Select-clear { color: #5E6A7A !important; }
+
 </style>
 </head>
 <body>
@@ -218,6 +268,7 @@ TAB_OPCOES = [
     ("Evolução",        "tab-evolucao"),
     ("Distribuição",    "tab-distribuicao"),
     ("Tabela Completa", "tab-tabela"),
+    ("Correlação",      "tab-correlacao"),
 ]
 METRIC_OPCOES = [
     ("Ret. Acum.",  "Ret_acum"),
@@ -677,6 +728,8 @@ def update_tab(tab, cache_key, dist_metric):
         return _tab_distribuicao(d, dist_metric or _DEFAULT_METRIC)
     elif tab == "tab-tabela":
         return _tab_tabela(d)
+    elif tab == "tab-correlacao":
+        return _tab_correlacao(d)
     return html.Div()
 
 
@@ -1148,13 +1201,22 @@ _FMT_MAP = {
 }
 
 
+# Colunas que recebem cor por sinal (verde/vermelho) na tabela
+_SIGN_COLS = ["Ret_acum", "Ret_ann", "Sharpe", "Sortino", "IR_Ibov", "Pct_do_CDI"]
+
+
 def _build_tabela_records(m: pd.DataFrame) -> list[dict]:
-    """Ordena por retorno, adiciona ranking e formata colunas."""
+    """Ordena por retorno, adiciona ranking, helpers numéricos e formata colunas."""
     display = m.copy()
     if "Ret_acum" in display.columns:
         display = display.sort_values("Ret_acum", ascending=False, na_position="last").reset_index(drop=True)
     display.insert(0, "#", range(1, len(display) + 1))
     display.insert(1, "★", display["Fundo"].apply(lambda x: "★" if x == NOME_AWR else ""))
+    # Helpers numéricos (antes de formatar) p/ colorir células por sinal via filter_query.
+    # Não entram em `columns`, então ficam ocultos — só alimentam o style_data_conditional.
+    for c in _SIGN_COLS:
+        if c in display.columns:
+            display[f"_num_{c}"] = pd.to_numeric(display[c], errors="coerce").fillna(0.0)
     for col, fn in _FMT_MAP.items():
         if col in display.columns:
             display[col] = display[col].apply(fn)
@@ -1169,13 +1231,31 @@ def _tabela_columns(m: pd.DataFrame) -> list[dict]:
 
 
 def _tabela_style_data_cond():
-    return [
-        {
-            "if": {"filter_query": '{★} = "★"'},
-            "backgroundColor": "rgba(200,169,110,0.06)",
-            "fontWeight": 700,
-        },
+    conds = [
+        # zebra striping discreto
+        {"if": {"row_index": "odd"}, "backgroundColor": "#0F1217"},
     ]
+    # verde/vermelho por sinal nos retornos e índices
+    for c in ["Ret_acum", "Ret_ann", "Sharpe", "Sortino", "IR_Ibov"]:
+        conds += [
+            {"if": {"filter_query": f"{{_num_{c}}} > 0", "column_id": c}, "color": COR_POSITIVO},
+            {"if": {"filter_query": f"{{_num_{c}}} < 0", "column_id": c}, "color": COR_NEGATIVO},
+        ]
+    # drawdown sempre em tom de alerta (é sempre negativo)
+    conds.append({"if": {"column_id": "DD_max"}, "color": "#E8927C"})
+    # % do CDI: verde se bate o CDI (≥100%), cinza caso contrário
+    conds += [
+        {"if": {"filter_query": "{_num_Pct_do_CDI} >= 1", "column_id": "Pct_do_CDI"}, "color": COR_POSITIVO},
+        {"if": {"filter_query": "{_num_Pct_do_CDI} < 1", "column_id": "Pct_do_CDI"}, "color": "#9AA5B4"},
+    ]
+    # linha do AWR destacada (por último p/ o fundo vencer o zebra)
+    conds += [
+        {"if": {"filter_query": '{★} = "★"'},
+         "backgroundColor": "rgba(200,169,110,0.10)", "fontWeight": 700},
+        {"if": {"filter_query": '{★} = "★"', "column_id": "Fundo"}, "color": COR_AWR},
+        {"if": {"filter_query": '{★} = "★"', "column_id": "★"}, "color": COR_AWR},
+    ]
+    return conds
 
 
 def _tab_tabela(d):
@@ -1229,36 +1309,41 @@ def _tab_tabela(d):
             data=records,
             sort_action="native",
             page_size=20,
+            style_as_list_view=True,
             style_table={
                 "overflowX": "auto",
-                "borderRadius": "8px",
-                "overflow": "hidden",
+                "borderRadius": "10px",
             },
             style_header={
                 "backgroundColor": "#0A0B0E",
-                "color": COR_AWR,
+                "color": "#8A94A6",
                 "fontWeight": 700,
                 "fontSize": "10px",
                 "textTransform": "uppercase",
-                "letterSpacing": "0.8px",
-                "border": "1px solid #1E2330",
+                "letterSpacing": "0.6px",
+                "fontFamily": "'Inter', sans-serif",
+                "border": "none",
+                "borderBottom": f"2px solid {COR_AWR}",
+                "padding": "12px 13px",
             },
             style_cell={
-                "backgroundColor": "#111318",
+                "backgroundColor": "#0C0E12",
                 "color": "#EFF1F5",
-                "fontSize": "12px",
+                "fontSize": "12.5px",
                 "fontFamily": "'JetBrains Mono', 'DM Mono', monospace",
-                "border": "1px solid #1A1F2B",
-                "padding": "9px 12px",
+                "border": "none",
+                "borderBottom": "1px solid #15191F",
+                "padding": "11px 13px",
                 "textAlign": "right",
                 "whiteSpace": "normal",
+                "height": "auto",
             },
             style_cell_conditional=[
-                {"if": {"column_id": "Fundo"}, "textAlign": "left", "minWidth": "200px",
-                 "fontFamily": "'Inter', sans-serif"},
-                {"if": {"column_id": "★"}, "textAlign": "center", "width": "28px", "padding": "2px 4px"},
-                {"if": {"column_id": "#"}, "textAlign": "center", "width": "38px",
-                 "color": "#5E6A7A", "fontWeight": 600, "padding": "2px 4px"},
+                {"if": {"column_id": "Fundo"}, "textAlign": "left", "minWidth": "230px",
+                 "fontFamily": "'Inter', sans-serif", "fontSize": "13px"},
+                {"if": {"column_id": "★"}, "textAlign": "center", "width": "32px", "padding": "2px 4px"},
+                {"if": {"column_id": "#"}, "textAlign": "center", "width": "42px",
+                 "color": "#5E6A7A", "fontWeight": 600, "padding": "2px 6px"},
             ],
             style_data_conditional=_tabela_style_data_cond(),
         ),
@@ -1278,6 +1363,164 @@ def filtrar_tabela(search, cache_key):
     if search:
         m = m[m["Fundo"].str.contains(search, case=False, na=False)]
     return _build_tabela_records(m)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 5: CORRELAÇÃO (heatmap dinâmico)
+# ─────────────────────────────────────────────────────────────────────────────
+# Tokens genéricos de nome de fundo — removidos para gerar rótulos curtos no heatmap.
+_STOP_TOKENS = {
+    "fif", "fic", "cic", "fia", "fim", "rl", "cotas", "ações", "acoes",
+    "inv", "long", "bias", "biased", "multimercado", "access", "de", "da", "f",
+}
+
+
+def _short_nome(nome: str) -> str:
+    """Rótulo curto e legível p/ os eixos do heatmap (ex.: 'Kapitalo Tarkus')."""
+    toks = [t for t in nome.split() if t.lower().strip(".") not in _STOP_TOKENS and len(t) > 1]
+    if not toks:
+        return nome.split()[0] if nome.split() else nome
+    return " ".join(toks[:2])
+
+
+def _tab_correlacao(d):
+    m = d["metricas"]
+    if m.empty:
+        return html.Div("Sem dados.", style={"color": "#666"})
+
+    fundos = list(m["Fundo"])
+    if NOME_AWR in fundos:                       # AWR sempre em 1º na lista de opções
+        fundos = [NOME_AWR] + [f for f in fundos if f != NOME_AWR]
+    options = [{"label": f, "value": f} for f in fundos]
+
+    return html.Div([
+        # ── Controles: seletor de fundos (add/remove) ──
+        html.Div(
+            style={"display": "flex", "alignItems": "center", "gap": "14px",
+                   "marginBottom": "18px", "flexWrap": "wrap"},
+            children=[
+                html.Span("FUNDOS NA MATRIZ", style={
+                    "color": "#5E6A7A", "fontSize": "10px", "letterSpacing": "0.8px",
+                    "textTransform": "uppercase", "fontWeight": 600, "whiteSpace": "nowrap",
+                }),
+                html.Div(
+                    dcc.Dropdown(
+                        id="corr-fundos",
+                        options=options,
+                        value=fundos,            # todos por padrão; remova com o × ou adicione
+                        multi=True,
+                        placeholder="Adicione ou remova fundos…",
+                        className="corr-dd",
+                        clearable=True,
+                    ),
+                    style={"flex": "1", "minWidth": "440px"},
+                ),
+            ],
+        ),
+        dcc.Graph(id="corr-heatmap", style={"height": "660px"},
+                  config={"displayModeBar": False}),
+        html.Div(
+            "Correlação dos retornos diários no período selecionado  ·  "
+            "tons mais dourados = mais correlacionado  ·  a faixa do AWR fica destacada.",
+            style={"color": "#5E6A7A", "fontSize": "11px", "marginTop": "10px",
+                   "letterSpacing": "0.3px"},
+        ),
+    ])
+
+
+@app.callback(
+    Output("corr-heatmap", "figure"),
+    Input("corr-fundos", "value"),
+    Input("store-data", "data"),
+    Input("active-tab", "data"),
+)
+def update_corr(selected, cache_key, active_tab):
+    if active_tab != "tab-correlacao":
+        return go.Figure()
+    if not cache_key or cache_key not in _CACHE:
+        return go.Figure()
+
+    ret = _CACHE[cache_key]["ret_diarios"]
+    selected = selected or []
+    cols = [c for c in selected if c in ret.columns and c != "Ibovespa"]
+    if NOME_AWR in cols:                          # AWR em 1º → faixa no topo/esquerda
+        cols = [NOME_AWR] + [c for c in cols if c != NOME_AWR]
+
+    if len(cols) < 2:
+        fig = go.Figure()
+        fig.add_annotation(text="Selecione ao menos 2 fundos para ver a correlação.",
+                           showarrow=False, font=dict(color="#5E6A7A", size=14))
+        fig.update_layout(template="plotly_dark", paper_bgcolor="#0A0B0E",
+                          plot_bgcolor="#0A0B0E", xaxis=dict(visible=False),
+                          yaxis=dict(visible=False), margin=dict(l=20, r=20, t=20, b=20))
+        return fig
+
+    corr = ret[cols].corr(min_periods=20)
+    n = len(cols)
+    labels = [("★ " + _short_nome(c)) if c == NOME_AWR else _short_nome(c) for c in cols]
+
+    z = corr.values.astype(float)
+    # zmin dinâmico a partir das correlações fora da diagonal (realça as diferenças)
+    off = z.copy()
+    np.fill_diagonal(off, np.nan)
+    if np.isfinite(off).any():
+        zmin = float(np.floor(np.nanmin(off) * 10) / 10)
+    else:
+        zmin = 0.0
+    zmax = 1.0
+    txt_size = 11 if n <= 8 else (9 if n <= 12 else 8)
+
+    fig = go.Figure(go.Heatmap(
+        z=z, x=labels, y=labels,
+        zmin=zmin, zmax=zmax,
+        colorscale=[[0.0, "#4B5563"], [0.5, "#9C8557"], [1.0, "#E3C896"]],
+        xgap=2, ygap=2,
+        texttemplate="%{z:.2f}",
+        textfont=dict(size=txt_size, color="#0A0B0E", family="JetBrains Mono"),
+        hovertemplate="<b>%{y}</b>  ×  <b>%{x}</b><br>Correlação: %{z:.2f}<extra></extra>",
+        colorbar=dict(
+            title=dict(text="ρ", font=dict(color="#8A94A6", size=12)),
+            tickfont=dict(color="#5E6A7A", size=10),
+            outlinewidth=0, thickness=14, len=0.7,
+        ),
+    ))
+
+    # Destaque da faixa do AWR (linha + coluna)
+    if NOME_AWR in cols:
+        i = cols.index(NOME_AWR)
+        fig.add_shape(type="rect", xref="x", yref="y",
+                      x0=-0.5, x1=n - 0.5, y0=i - 0.5, y1=i + 0.5,
+                      line=dict(color=COR_AWR, width=2.5), fillcolor="rgba(0,0,0,0)", layer="above")
+        fig.add_shape(type="rect", xref="x", yref="y",
+                      x0=i - 0.5, x1=i + 0.5, y0=-0.5, y1=n - 0.5,
+                      line=dict(color=COR_AWR, width=2.5), fillcolor="rgba(0,0,0,0)", layer="above")
+
+    # Subtítulo: com quem o AWR está mais / menos correlacionado
+    subt = ""
+    if NOME_AWR in cols:
+        s = corr[NOME_AWR].drop(labels=[NOME_AWR], errors="ignore").dropna()
+        if not s.empty:
+            subt = (f"AWR · + correlacionado: {_short_nome(s.idxmax())} ({s.max():.2f})"
+                    f"   ·   − correlacionado: {_short_nome(s.idxmin())} ({s.min():.2f})")
+
+    titulo = "Matriz de correlação"
+    if subt:
+        titulo += f"<br><span style='font-size:11px;color:#5E6A7A'>{subt}</span>"
+
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="#0A0B0E",
+        plot_bgcolor="#0A0B0E",
+        title=dict(text=titulo, font=dict(size=15, color="#EFF1F5", family="Inter"),
+                   x=0, xanchor="left"),
+        xaxis=dict(tickfont=dict(color="#9AA5B4", size=10), tickangle=-45,
+                   side="bottom", showgrid=False, ticks="", constrain="domain"),
+        yaxis=dict(tickfont=dict(color="#9AA5B4", size=10), autorange="reversed",
+                   showgrid=False, ticks="", scaleanchor="x", constrain="domain"),
+        margin=dict(l=130, r=30, t=80, b=130),
+        hoverlabel=dict(bgcolor="#111318", font_size=12, font_family="Inter", bordercolor="#1E2330"),
+    )
+    return fig
 
 
 # ─────────────────────────────────────────────────────────────────────────────
