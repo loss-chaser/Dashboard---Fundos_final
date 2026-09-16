@@ -30,7 +30,7 @@ import numpy as np
 import pandas as pd
 
 from config import (
-    CNPJ_AWR, NOME_AWR, CNPJ_PARA_NOME, FUNDOS,
+    CNPJ_AWR, NOME_AWR, CNPJ_PARA_NOME, FUNDOS, CNPJ_FMT,
     COR_AWR, COR_AWR_BG, COR_IBOV, COR_CDI, COR_OUTROS,
     COR_POSITIVO, COR_NEGATIVO, DIAS_UTEIS_ANO, CORES_FUNDOS,
 )
@@ -154,6 +154,53 @@ body {
     font-weight: 700;
 }
 
+/* ── Seletor de datas personalizado (DatePickerRange) ──
+   O componente do Dash vem com tema claro cravado no CSS dele; sem estas
+   regras ele aparece como um retangulo branco no meio da barra escura. */
+.periodo-custom .DateInput,
+.periodo-custom .DateInput_input,
+.periodo-custom .DateRangePickerInput {
+    background: transparent !important;
+    color: #9AA5B4 !important;
+    border: none !important;
+    font-family: 'Inter', sans-serif !important;
+    font-size: 11px !important;
+    font-weight: 500 !important;
+}
+.periodo-custom .DateRangePickerInput {
+    border: 1px solid #1E2330 !important;
+    border-radius: 4px !important;
+}
+.periodo-custom .DateRangePickerInput:hover { border-color: #C8A96E !important; }
+.periodo-custom .DateInput_input { padding: 4px 6px !important; width: 84px !important; }
+.periodo-custom .DateInput_input__focused { border-bottom: 1px solid #C8A96E !important; }
+.periodo-custom .DateRangePickerInput_arrow { color: #5E6A7A !important; }
+.periodo-custom .DateRangePickerInput_arrow_svg { fill: #5E6A7A !important; }
+.periodo-custom .DateRangePicker_picker { background: #0D111A !important; z-index: 1200 !important; }
+.periodo-custom .DayPicker, .periodo-custom .CalendarMonth,
+.periodo-custom .CalendarMonthGrid, .periodo-custom .DayPicker_weekHeader {
+    background: #0D111A !important; color: #EFF1F5 !important;
+}
+.periodo-custom .CalendarMonth_caption, .periodo-custom .DayPicker_weekHeader { color: #9AA5B4 !important; }
+.periodo-custom .CalendarDay__default {
+    background: #0D111A !important; border: 1px solid #1E2330 !important; color: #9AA5B4 !important;
+}
+.periodo-custom .CalendarDay__default:hover { background: #1E2330 !important; color: #EFF1F5 !important; }
+.periodo-custom .CalendarDay__selected,
+.periodo-custom .CalendarDay__selected:hover {
+    background: #C8A96E !important; border-color: #C8A96E !important; color: #0D111A !important;
+}
+.periodo-custom .CalendarDay__selected_span,
+.periodo-custom .CalendarDay__hovered_span {
+    background: rgba(200,169,110,0.22) !important; border-color: #1E2330 !important; color: #EFF1F5 !important;
+}
+.periodo-custom .CalendarDay__blocked_out_of_range {
+    background: #0A0E15 !important; color: #3A4250 !important;
+}
+.periodo-custom .DayPickerNavigation_button__default {
+    background: #0D111A !important; border: 1px solid #1E2330 !important;
+}
+
 /* ── Metric selector buttons ── */
 .metric-btn {
     background: transparent;
@@ -199,7 +246,41 @@ body {
 .dash-table-container { border-radius: 10px; border: 1px solid #15191F; }
 .dash-spreadsheet-inner td.dash-cell, .dash-spreadsheet-inner th.dash-header { outline: none !important; }
 .dash-spreadsheet-inner tbody tr { transition: background-color .12s ease; }
-.dash-spreadsheet-inner tbody tr:hover td.dash-cell { background-color: rgba(200,169,110,0.06) !important; }
+
+/* O dash_table declara as próprias variáveis de tema (claras) no <table>, e o faz
+   via CSS injetado em runtime pelo async-table.js — ou seja, DEPOIS deste <style>.
+   Sem !important o tema claro ganha: --hover é #fdfdfd (branco) e --accent é
+   hotpink, o que deixava a linha sob o mouse branca-no-branco e ilegível. */
+.dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner table {
+    --hover: #1A1F2B !important;
+    --accent: #C8A96E !important;
+    --border: #1A1F2B !important;
+    --text-color: #EFF1F5 !important;
+    --selected-background: rgba(200,169,110,0.14) !important;
+    --background-color-ellipses: #111318 !important;
+    --faded-text: #5E6A7A !important;
+    --faded-text-header: #5E6A7A !important;
+    --faded-dropdown: #1A1F2B !important;
+    --muted: #3A4150 !important;
+}
+/* Fundo do hover precisa ser OPACO: a regra do dash pinta o <tr>, e um
+   rgba() translúcido na célula deixava o branco do <tr> aparecer por baixo. */
+.dash-spreadsheet-inner tbody tr:hover td.dash-cell { background-color: #1A1F2B !important; }
+
+/* Tooltip das células (usado p/ mostrar nome completo + CNPJ do fundo) */
+.dash-table-tooltip {
+    background-color: #0A0B0E !important;
+    border: 1px solid #2A3040 !important;
+    border-radius: 6px !important;
+    color: #EFF1F5 !important;
+    font-family: 'Inter', sans-serif !important;
+    font-size: 11.5px !important;
+    line-height: 1.55 !important;
+    box-shadow: 0 6px 22px rgba(0,0,0,0.6) !important;
+    max-width: 340px !important;
+}
+.dash-table-tooltip .dash-table-tooltip-inner, .dash-table-tooltip p { margin: 0 !important; }
+.dash-table-tooltip strong, .dash-table-tooltip b { color: #C8A96E !important; }
 
 /* ── dcc.Dropdown (tema escuro) ── */
 .corr-dd .Select-control,
@@ -284,7 +365,26 @@ _DEFAULT_TAB     = "tab-risco-retorno"
 _DEFAULT_METRIC  = "Ret_acum"
 
 
+def _periodo_custom(periodo) -> tuple[date, date] | None:
+    """Decodifica 'custom:AAAA-MM-DD:AAAA-MM-DD'. None se nao for custom."""
+    if not isinstance(periodo, str) or not periodo.startswith("custom:"):
+        return None
+    try:
+        _, ini, fim = periodo.split(":", 2)
+        sd, ed = date.fromisoformat(ini), date.fromisoformat(fim)
+    except Exception:
+        return None
+    if sd > ed:
+        sd, ed = ed, sd
+    if sd == ed:                      # janela de 1 dia nao gera serie
+        sd = sd - timedelta(days=1)
+    return sd, ed
+
+
 def _datas_para_periodo(periodo: str) -> tuple[date, date]:
+    custom = _periodo_custom(periodo)
+    if custom:
+        return custom
     hoje = date.today()
     if periodo == "1m":   return hoje - timedelta(days=30),   hoje
     if periodo == "3m":   return hoje - timedelta(days=91),   hoje
@@ -365,6 +465,19 @@ app.layout = html.Div(
                             )
                             for lbl, key in PERIODO_OPCOES
                         ],
+                        dcc.DatePickerRange(
+                            id="periodo-custom",
+                            className="periodo-custom",
+                            display_format="DD/MM/YY",
+                            first_day_of_week=1,
+                            minimum_nights=1,
+                            start_date_placeholder_text="de",
+                            end_date_placeholder_text="ate",
+                            # min/max sao definidos pelo callback: aqui o layout
+                            # ainda roda ANTES do inicializar_global(), e o
+                            # get_awr_inicio() devolveria None.
+                            style={"marginLeft": "8px"},
+                        ),
                         html.Span(
                             id="periodo-display",
                             style={
@@ -438,6 +551,31 @@ app.layout = html.Div(
 _CACHE = {}
 
 
+def _ffill_intervalo_vivo(df: pd.DataFrame) -> pd.DataFrame:
+    """ffill só ENTRE a primeira e a última cota de cada coluna.
+
+    Buraco no meio da série (dia em que a CVM não publicou a cota do fundo)
+    precisa ser preenchido: sem isso o pct_change devolve NaN na virada do
+    buraco, o dropna() das métricas joga essa variação fora e o retorno
+    composto perde o movimento daqueles dias. Era o que fazia o Kapitalo
+    Tarkus aparecer com 50,27% no ranking e 47,52% na tabela de cotas.
+
+    As pontas ficam NaN de propósito: preenchê-las criaria retornos de 0,00%
+    em dias que o fundo ainda não reportou (ou antes de ele existir), o que
+    infla o nº de observações e amassa a volatilidade.
+    """
+    out = df.ffill()
+    for c in df.columns:
+        s = df[c]
+        primeiro, ultimo = s.first_valid_index(), s.last_valid_index()
+        if primeiro is None:
+            out[c] = s
+            continue
+        out.loc[out.index < primeiro, c] = np.nan
+        out.loc[out.index > ultimo, c] = np.nan
+    return out
+
+
 def _build_cache(sd: date, ed: date) -> str:
     """Carrega dados e monta cache. Retorna cache_key."""
     cache_key = f"{sd}_{ed}"
@@ -454,8 +592,8 @@ def _build_cache(sd: date, ed: date) -> str:
     # Junta Ibovespa nas cotas
     df_cotas = df_cotas.join(ibov, how="outer")
 
-    # Retornos diários
-    ret_d = retornos_diarios(df_cotas)
+    # Retornos diários (com os buracos de publicação tapados — ver docstring)
+    ret_d = retornos_diarios(_ffill_intervalo_vivo(df_cotas))
 
     # Retorno acumulado (para gráfico e tabela)
     df_cotas_filled = df_cotas.ffill()
@@ -494,6 +632,22 @@ def _build_cache(sd: date, ed: date) -> str:
     # Cota base 100
     cota100 = cota_base_100(ret_d)
 
+    # ── Cotas p/ a tabela da aba Evolução ──
+    # Só as datas em que HÁ cota de fundo. O join com o Ibovespa (how="outer")
+    # acrescenta os dias em que a bolsa negociou mas a CVM ainda não publicou, e
+    # o ffill copiaria a última cota pra esses dias — fazendo a tabela rotular
+    # uma cota velha com uma data em que ela não existe.
+    cols_fundos = [c for c in df_cotas_filled.columns if c != "Ibovespa"]
+    df_cotas_raw = df_cotas_filled.loc[
+        df_cotas_filled.index.isin(dados["df_cotas"].index), cols_fundos
+    ]
+    # Última data com cota de fato publicada, por fundo (p/ sinalizar defasagem)
+    ult_cota = {
+        c: (dados["df_cotas"][c].dropna().index[-1]
+            if dados["df_cotas"][c].notna().any() else None)
+        for c in cols_fundos
+    }
+
     _CACHE[cache_key] = {
         "metricas": metricas,
         "ret_diarios": ret_d,
@@ -506,7 +660,8 @@ def _build_cache(sd: date, ed: date) -> str:
         "variacao": variacao,
         "data_ini": dados["data_ini"],
         "data_fim": dados["data_fim"],
-        "df_cotas_raw": df_cotas_filled[[c for c in df_cotas_filled.columns if c != "Ibovespa"]],
+        "df_cotas_raw": df_cotas_raw,
+        "ult_cota": ult_cota,
     }
 
     print(f"[AWR] Dados prontos! {metricas.shape[0]} fundos com métricas.")
@@ -527,26 +682,60 @@ inicializar_global()
 @app.callback(
     Output("periodo-selecionado", "data"),
     Output("periodo-display", "children"),
+    Output("periodo-custom", "start_date"),
+    Output("periodo-custom", "end_date"),
+    Output("periodo-custom", "min_date_allowed"),
+    Output("periodo-custom", "max_date_allowed"),
     *[Output(f"btn-periodo-{key}", "className") for _, key in PERIODO_OPCOES],
     *[Input(f"btn-periodo-{key}", "n_clicks") for _, key in PERIODO_OPCOES],
+    Input("periodo-custom", "start_date"),
+    Input("periodo-custom", "end_date"),
 )
-def mudar_periodo(*_):
+def mudar_periodo(*args):
+    """Botao de atalho OU intervalo escolhido no calendario.
+
+    Os dois caminhos convivem: clicar num atalho reescreve as datas do
+    calendario (fica coerente e da para ajustar a partir dali); mexer no
+    calendario desmarca os atalhos, porque nenhum deles representa o
+    intervalo escolhido.
+    """
+    n_btn = len(PERIODO_OPCOES)
+    cs, ce = args[n_btn], args[n_btn + 1]
+
     triggered = callback_context.triggered
-    periodo = _DEFAULT_PERIODO
+    periodo, veio_do_calendario = _DEFAULT_PERIODO, False
     if triggered and triggered[0]["prop_id"] != ".":
         tid = triggered[0]["prop_id"].split(".")[0]
-        for _, key in PERIODO_OPCOES:
-            if tid == f"btn-periodo-{key}":
-                periodo = key
-                break
+        if tid == "periodo-custom":
+            veio_do_calendario = True
+        else:
+            for _, key in PERIODO_OPCOES:
+                if tid == f"btn-periodo-{key}":
+                    periodo = key
+                    break
 
-    sd, ed = _datas_para_periodo(periodo)
+    if veio_do_calendario and cs and ce:
+        sd = date.fromisoformat(str(cs)[:10])
+        ed = date.fromisoformat(str(ce)[:10])
+        if sd > ed:
+            sd, ed = ed, sd
+        periodo = f"custom:{sd.isoformat()}:{ed.isoformat()}"
+        sd, ed = _datas_para_periodo(periodo)
+    else:
+        sd, ed = _datas_para_periodo(periodo)
+
     display = f"{sd.strftime('%d/%m/%Y')} → {ed.strftime('%d/%m/%Y')}"
     classnames = [
         "periodo-btn periodo-btn-active" if key == periodo else "periodo-btn"
         for _, key in PERIODO_OPCOES
     ]
-    return periodo, display, *classnames
+    # Limites do calendario: primeiro dia com dado da AWR ate hoje. Definidos
+    # aqui (e nao no layout) porque o layout e montado antes do
+    # inicializar_global(), quando get_awr_inicio() ainda devolve None.
+    limite_min = get_awr_inicio() or date(2020, 1, 1)
+    limite_max = date.today()
+    return (periodo, display, sd.isoformat(), ed.isoformat(),
+            limite_min.isoformat(), limite_max.isoformat(), *classnames)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -755,7 +944,6 @@ def _tab_risco_retorno_inner(d):
     # Peers
     pares = m[m["Fundo"] != NOME_AWR].copy()
     if not pares.empty:
-        pl_col = pares["PL"].fillna(0) if "PL" in pares.columns else pd.Series(0.0, index=pares.index)
         fig.add_trace(go.Scatter(
             x=pares["Vol_ann"],
             y=pares["Ret_ann"],
@@ -766,13 +954,17 @@ def _tab_risco_retorno_inner(d):
                 opacity=0.55,
             ),
             text=pares["Fundo"],
-            customdata=np.stack([
-                pares["Sharpe"].fillna(0),
-                pares["DD_max"].fillna(0),
-                pl_col,
-            ], axis=-1),
+            customdata=[
+                [sh, dd, CNPJ_FMT.get(nome, "—")]
+                for sh, dd, nome in zip(
+                    pares["Sharpe"].fillna(0),
+                    pares["DD_max"].fillna(0),
+                    pares["Fundo"],
+                )
+            ],
             hovertemplate=(
                 "<b>%{text}</b><br>"
+                "CNPJ %{customdata[2]}<br>"
                 "Ret ann: %{y:.1%}<br>"
                 "Vol ann: %{x:.1%}<br>"
                 "Sharpe: %{customdata[0]:.2f}<br>"
@@ -795,6 +987,7 @@ def _tab_risco_retorno_inner(d):
             textfont=dict(color=COR_AWR, size=12, family="DM Sans"),
             hovertemplate=(
                 "<b>AWR Capital</b><br>"
+                f"CNPJ {CNPJ_FMT.get(NOME_AWR, '—')}<br>"
                 f"Ret ann: {fmt_pct(awr['Ret_ann'].iloc[0])}<br>"
                 f"Vol ann: {fmt_pct(awr['Vol_ann'].iloc[0])}<br>"
                 f"Sharpe: {fmt_num(awr['Sharpe'].iloc[0])}<br>"
@@ -893,7 +1086,10 @@ def _tab_evolucao(d):
             name=col,
             showlegend=True,
             hoverlabel=dict(bgcolor="#111318", bordercolor=cor, font_color=cor, font_size=12, font_family="Inter"),
-            hovertemplate=f"<b>{col}</b><br>%{{x|%d/%m/%Y}}<br>Base 100: %{{y:.2f}}<extra></extra>",
+            hovertemplate=(
+                f"<b>{col}</b><br>CNPJ {CNPJ_FMT.get(col, '—')}"
+                "<br>%{x|%d/%m/%Y}<br>Base 100: %{y:.2f}<extra></extra>"
+            ),
         ))
 
     # CDI acumulado → cota 100
@@ -927,7 +1123,10 @@ def _tab_evolucao(d):
             line=dict(color=COR_AWR, width=3.5),
             name=NOME_AWR,
             hoverlabel=dict(bgcolor="#111318", bordercolor=COR_AWR, font_color=COR_AWR, font_size=12, font_family="Inter"),
-            hovertemplate=f"<b>{NOME_AWR}</b><br>%{{x|%d/%m/%Y}}<br>Base 100: %{{y:.2f}}<extra></extra>",
+            hovertemplate=(
+                f"<b>{NOME_AWR}</b><br>CNPJ {CNPJ_FMT.get(NOME_AWR, '—')}"
+                "<br>%{x|%d/%m/%Y}<br>Base 100: %{y:.2f}<extra></extra>"
+            ),
         ))
 
     fig.update_layout(
@@ -965,8 +1164,10 @@ def _tab_evolucao(d):
     if df_cotas_raw is None or df_cotas_raw.empty:
         return grafico
 
-    data_ini_str = df_cotas_raw.index[0].strftime("%d/%m/%Y")
-    data_fim_str = df_cotas_raw.index[-1].strftime("%d/%m/%Y")
+    ult_cota = d.get("ult_cota") or {}
+    ts_ini, ts_fim = df_cotas_raw.index[0], df_cotas_raw.index[-1]
+    data_ini_str = ts_ini.strftime("%d/%m/%Y")
+    data_fim_str = ts_fim.strftime("%d/%m/%Y")
 
     rows = []
     for col in df_cotas_raw.columns:
@@ -977,18 +1178,36 @@ def _tab_evolucao(d):
         c_fim = serie.iloc[-1]
         ret = (c_fim / c_ini - 1) if c_ini != 0 else np.nan
         cor = CORES_FUNDOS.get(col, COR_OUTROS)
+        # A cota final é a última publicada; se o fundo está defasado em relação
+        # ao fim da janela, ela vem repetida (ffill) e isso é sinalizado.
+        ts_ult = ult_cota.get(col) or serie.index[-1]
+        defasado = ts_ult < ts_fim
         rows.append({
             "●": "●",
             "_cor": cor,
+            "_defasado": defasado,
+            "_ult": ts_ult.strftime("%d/%m/%Y"),
             "Fundo": col,
+            "CNPJ": CNPJ_FMT.get(col, "—"),
             f"Cota {data_ini_str}": f"{c_ini:,.6f}".replace(",", "X").replace(".", ",").replace("X", "."),
             f"Cota {data_fim_str}": f"{c_fim:,.6f}".replace(",", "X").replace(".", ",").replace("X", "."),
             "Rentabilidade": fmt_pct(ret, 2),
         })
 
-    col_ids = ["●", "Fundo", f"Cota {data_ini_str}", f"Cota {data_fim_str}", "Rentabilidade"]
+    col_ids = ["●", "Fundo", "CNPJ", f"Cota {data_ini_str}", f"Cota {data_fim_str}", "Rentabilidade"]
     columns = [{"name": c, "id": c} for c in col_ids]
-    data_records = [{k: v for k, v in r.items() if k != "_cor"} for r in rows]
+    _oculto = ("_cor", "_defasado", "_ult")
+    data_records = [{k: v for k, v in r.items() if k not in _oculto} for r in rows]
+
+    # Tooltip: nome completo + CNPJ + data real da última cota do fundo
+    tooltip_data = []
+    for r in rows:
+        nota = (
+            f"  \nÚltima cota publicada: **{r['_ult']}**"
+            f"{'  (defasada — valor repetido até o fim da janela)' if r['_defasado'] else ''}"
+        )
+        info = {"value": f"**{r['Fundo']}**  \nCNPJ {r['CNPJ']}{nota}", "type": "markdown"}
+        tooltip_data.append({"Fundo": info, "CNPJ": info, "●": info})
 
     style_data_cond = [
         {
@@ -998,6 +1217,14 @@ def _tab_evolucao(d):
             "fontSize": "16px",
         }
         for r in rows
+    ] + [
+        # cota final defasada (repetida por ffill) sai em tom de alerta
+        {
+            "if": {"filter_query": f'{{Fundo}} = "{r["Fundo"]}"',
+                   "column_id": f"Cota {data_fim_str}"},
+            "color": "#E8927C",
+        }
+        for r in rows if r["_defasado"]
     ] + [
         {
             "if": {"filter_query": f'{{Fundo}} = "{NOME_AWR}"'},
@@ -1031,9 +1258,14 @@ def _tab_evolucao(d):
         style_cell_conditional=[
             {"if": {"column_id": "Fundo"}, "textAlign": "left", "minWidth": "220px",
              "fontFamily": "'Inter', sans-serif"},
+            {"if": {"column_id": "CNPJ"}, "textAlign": "left", "width": "150px",
+             "minWidth": "150px", "color": "#9AA5B4", "letterSpacing": "0.2px"},
             {"if": {"column_id": "●"}, "textAlign": "center", "width": "30px", "padding": "2px"},
         ],
         style_data_conditional=style_data_cond,
+        tooltip_data=tooltip_data,
+        tooltip_delay=250,
+        tooltip_duration=None,
         page_size=15,
     )
 
@@ -1175,7 +1407,7 @@ def update_dist(metric_col, cache_key, active_tab):
 # TAB 4: TABELA COMPLETA
 # ─────────────────────────────────────────────────────────────────────────────
 _COL_LABELS = {
-    "#": "#", "★": "★", "Fundo": "Fundo", "N_obs": "N obs",
+    "#": "#", "★": "★", "Fundo": "Fundo", "CNPJ": "CNPJ", "N_obs": "N obs",
     "Ret_acum": "Ret. Acum.", "Ret_ann": "Ret. Ann.",
     "Vol_ann": "Vol. Ann.", "Sharpe": "Sharpe", "Sortino": "Sortino",
     "DD_max": "DD Máx.", "Pct_meses_pos": "% Meses +",
@@ -1205,13 +1437,25 @@ _FMT_MAP = {
 _SIGN_COLS = ["Ret_acum", "Ret_ann", "Sharpe", "Sortino", "IR_Ibov", "Pct_do_CDI"]
 
 
+def _insert_cols_fixas(display: pd.DataFrame) -> pd.DataFrame:
+    """Insere as colunas #, ★ e CNPJ.
+
+    Usada tanto pelos records quanto pelo header, pra que a ordem das colunas
+    nunca saia de sincronia entre os dois.
+    """
+    display.insert(0, "#", range(1, len(display) + 1))
+    display.insert(1, "★", display["Fundo"].apply(lambda x: "★" if x == NOME_AWR else ""))
+    pos = display.columns.get_loc("Fundo") + 1
+    display.insert(pos, "CNPJ", display["Fundo"].map(CNPJ_FMT).fillna("—"))
+    return display
+
+
 def _build_tabela_records(m: pd.DataFrame) -> list[dict]:
     """Ordena por retorno, adiciona ranking, helpers numéricos e formata colunas."""
     display = m.copy()
     if "Ret_acum" in display.columns:
         display = display.sort_values("Ret_acum", ascending=False, na_position="last").reset_index(drop=True)
-    display.insert(0, "#", range(1, len(display) + 1))
-    display.insert(1, "★", display["Fundo"].apply(lambda x: "★" if x == NOME_AWR else ""))
+    display = _insert_cols_fixas(display)
     # Helpers numéricos (antes de formatar) p/ colorir células por sinal via filter_query.
     # Não entram em `columns`, então ficam ocultos — só alimentam o style_data_conditional.
     for c in _SIGN_COLS:
@@ -1224,9 +1468,7 @@ def _build_tabela_records(m: pd.DataFrame) -> list[dict]:
 
 
 def _tabela_columns(m: pd.DataFrame) -> list[dict]:
-    display = m.copy()
-    display.insert(0, "#", 0)
-    display.insert(1, "★", "")
+    display = _insert_cols_fixas(m.copy())
     return [{"name": _COL_LABELS.get(c, c), "id": c} for c in display.columns]
 
 
@@ -1341,6 +1583,9 @@ def _tab_tabela(d):
             style_cell_conditional=[
                 {"if": {"column_id": "Fundo"}, "textAlign": "left", "minWidth": "230px",
                  "fontFamily": "'Inter', sans-serif", "fontSize": "13px"},
+                {"if": {"column_id": "CNPJ"}, "textAlign": "left", "width": "155px",
+                 "minWidth": "155px", "color": "#9AA5B4", "fontSize": "11.5px",
+                 "whiteSpace": "nowrap"},
                 {"if": {"column_id": "★"}, "textAlign": "center", "width": "32px", "padding": "2px 4px"},
                 {"if": {"column_id": "#"}, "textAlign": "center", "width": "42px",
                  "color": "#5E6A7A", "fontWeight": 600, "padding": "2px 6px"},

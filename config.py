@@ -43,6 +43,16 @@ FUNDOS: dict[str, str] = {
 CNPJ_PARA_NOME = {v: k for k, v in FUNDOS.items()}
 TODOS_CNPJS = set(FUNDOS.values())
 
+
+def fmt_cnpj(cnpj: str) -> str:
+    """14 dígitos → 00.000.000/0000-00 (formato de exibição)."""
+    d = "".join(ch for ch in str(cnpj) if ch.isdigit()).zfill(14)
+    return f"{d[:2]}.{d[2:5]}.{d[5:8]}/{d[8:12]}-{d[12:14]}"
+
+
+# Nome do fundo → CNPJ já formatado (usado nas tabelas e nos hovers do dashboard)
+CNPJ_FMT: dict[str, str] = {nome: fmt_cnpj(c) for nome, c in FUNDOS.items()}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # URLs CVM
 # ─────────────────────────────────────────────────────────────────────────────
@@ -96,6 +106,7 @@ CORES_FUNDOS: dict[str, str] = {
     "Itaú Optimus Long Bias Multimercado FIF":    "#EF9A9A",
     "Dynamo Cougar FIF":                          "#80DEEA",
     "Truxt Long Bias Access FIF Cotas FIA":       "#DCEDC8",
+    "Absolute Pace FIC FIF Ações RL":             "#B0BEC5",
 }
 # ─────────────────────────────────────────────────────────────────────────────
 # EMAIL (mantido do seu código original)

@@ -12,8 +12,18 @@ from config import DIAS_UTEIS_ANO, RF_FALLBACK_AA, MIN_OBS_METRICAS
 # RETORNOS BÁSICOS
 # ─────────────────────────────────────────────────────────────────────────────
 def retornos_diarios(df_cotas: pd.DataFrame) -> pd.DataFrame:
-    """Retornos diários a partir de cotas (pct_change)."""
-    return df_cotas.pct_change().iloc[1:]
+    """Retornos diários a partir de cotas.
+
+    Feito com shift() em vez de pct_change() de propósito: até o pandas 2.x o
+    pct_change() preenchia os NaN pra trás por padrão, o que inventava retornos
+    de 0,00% nos dias sem cota publicada — inflando o nº de observações e
+    amassando a volatilidade (e o Sharpe). No pandas 3 esse preenchimento
+    deixou de existir, então a mesma imagem do app dava números diferentes
+    conforme a versão que o pip resolvesse no build. Com shift() o NaN
+    propaga igual em qualquer versão; os buracos de publicação são tratados
+    explicitamente antes, no _ffill_intervalo_vivo do app.py.
+    """
+    return (df_cotas / df_cotas.shift(1) - 1).iloc[1:]
 
 
 def retorno_acumulado(ret: pd.Series) -> float:

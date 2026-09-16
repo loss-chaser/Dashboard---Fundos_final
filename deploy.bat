@@ -25,7 +25,7 @@ REM Verifica se esta na pasta certa
 if not exist "app.py" (
     echo [ERRO] Voce nao esta na pasta awr_dashboard!
     echo Rode primeiro:
-    echo   cd /d "C:\Users\HP\AWR Capital\NuvemAwr - Codigos\VD_codigos\awr_dashboard"
+    echo   cd /d "C:\Users\VictorDelgadoDias\AWR Capital\NuvemAwr - Codigos\VD_codigos\awr_dashboard"
     pause
     exit /b 1
 )
