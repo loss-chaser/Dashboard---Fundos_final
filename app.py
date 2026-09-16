@@ -34,7 +34,7 @@ from config import (
     COR_AWR, COR_AWR_BG, COR_IBOV, COR_CDI, COR_OUTROS,
     COR_POSITIVO, COR_NEGATIVO, DIAS_UTEIS_ANO, CORES_FUNDOS,
 )
-from data_loader import inicializar_global, filtrar_periodo, get_awr_inicio
+from data_loader import inicializar_global, filtrar_periodo, get_awr_inicio, get_metadata
 from metrics import (
     retornos_diarios, retorno_acumulado, retorno_anualizado,
     vol_anualizada, sharpe, max_drawdown, cota_base_100,
@@ -339,6 +339,55 @@ body {
 </html>
 """
 
+
+# ─── Selo de frescor do dado ────────────────────────────────────────────────
+# A Action roda de seg a sex e o Space so recarrega os dados quando e
+# reconstruido. Se ela falhar, o dashboard continua abrindo normal, com dado
+# velho e sem avisar ninguem. Este selo torna o atraso visivel.
+_ATRASO_ALERTA_DU = 2          # dias uteis tolerados antes de ficar vermelho
+
+
+def _dias_uteis_entre(inicio: date, fim: date) -> int:
+    """Dias uteis de (inicio, fim]. Nao considera feriado - a margem de 2 du
+    ja absorve isso; o objetivo e detectar Action parada, nao contar pregao."""
+    dias, d = 0, inicio
+    while d < fim:
+        d += timedelta(days=1)
+        if d.weekday() < 5:
+            dias += 1
+    return dias
+
+
+def selo_frescor():
+    """Span com a data da ultima cota; vermelho quando o dado esta atrasado."""
+    meta = get_metadata() or {}
+    bruto = meta.get("ultima_cota")
+    if not bruto:
+        return html.Span()
+    try:
+        ultima = date.fromisoformat(str(bruto)[:10])
+    except Exception:
+        return html.Span()
+
+    atraso = _dias_uteis_entre(ultima, date.today())
+    atrasado = atraso > _ATRASO_ALERTA_DU
+    cor, fundo = ("#E5615C", "rgba(229,97,92,0.12)") if atrasado else ("#5E6A7A", "transparent")
+    titulo = (f"Ultima cota publicada: {ultima:%d/%m/%Y} ({atraso} dia(s) util(eis) atras). "
+              + ("A atualizacao automatica pode ter falhado - confira a GitHub Action."
+                 if atrasado else "Dado em dia."))
+    return html.Span(
+        ("⚠ " if atrasado else "") + f"cota {ultima:%d/%m}",
+        title=titulo,
+        style={
+            "fontSize": "10px", "color": cor, "background": fundo,
+            "border": f"1px solid {'#E5615C' if atrasado else '#1E2330'}",
+            "borderRadius": "4px", "padding": "2px 7px", "marginLeft": "10px",
+            "fontFamily": "'JetBrains Mono', monospace", "letterSpacing": "0.3px",
+            "whiteSpace": "nowrap",
+        },
+    )
+
+
 # ─── Opções de período e abas ────────────────────────────────────────────────
 PERIODO_OPCOES = [
     ("1M", "1m"), ("3M", "3m"), ("6M", "6m"),
@@ -445,6 +494,7 @@ app.layout = html.Div(
                             "fontSize": "13px", "color": "#5E6A7A",
                             "fontWeight": 400, "letterSpacing": "0.5px",
                         }),
+                        selo_frescor(),
                     ],
                 ),
                 # Seletor de período

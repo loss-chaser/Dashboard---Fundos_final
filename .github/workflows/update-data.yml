@@ -72,10 +72,23 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          # Adiciona o remote do HF com autenticação
+          # O GitHub é a fonte; o Space é espelho. Mas espelhar com --force
+          # apaga em silêncio qualquer commit que exista só no Space (alguém
+          # editando pela interface do HF, por exemplo). Aqui a gente confere
+          # antes e falha alto em vez de destruir.
           git remote add hf https://loss-chaser:${HF_TOKEN}@huggingface.co/spaces/loss-chaser/dashboard-fundos
-          
-          # Pusha pro HF (force pra resolver qualquer divergência histórica entre os repos)
-          git push hf main --force
-          
-          echo "✓ Hugging Face Space atualizado"
+          git fetch hf main
+
+          if git merge-base --is-ancestor hf/main HEAD; then
+            git push hf main
+            echo "✓ Hugging Face Space atualizado"
+          else
+            echo "::error::O Space tem commit que o GitHub não tem. Nada foi publicado."
+            echo "Commits só no Space:"
+            git log --oneline HEAD..hf/main
+            echo ""
+            echo "Para resolver, no seu PC:"
+            echo "  git fetch hf main && git rebase hf/main && git push origin main"
+            echo "Só use --force depois de conferir que não vai perder nada."
+            exit 1
+          fi

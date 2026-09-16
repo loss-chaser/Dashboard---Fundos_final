@@ -166,3 +166,18 @@ def filtrar_periodo(data_busca: date, data_fim: date) -> dict:
         "data_ini": data_ini,
         "data_fim": data_fim,
     }
+
+def get_metadata() -> dict:
+    """Conteudo do data/metadata.json (ultima_cota, data_atualizacao, ...).
+
+    Lido do disco a cada chamada: o arquivo so muda quando o container e
+    recriado, entao nao ha ganho em cachear, e assim um rebuild sem restart
+    do processo tambem seria refletido.
+    """
+    import json
+    meta_path = DATA_DIR / "metadata.json"
+    try:
+        with open(meta_path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:
+        return {}
