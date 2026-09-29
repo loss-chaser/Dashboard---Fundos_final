@@ -1,11 +1,11 @@
 {
-  "data_atualizacao": "2026-09-28T18:22:56.301051",
-  "data_ini": "2023-09-29",
-  "data_fim": "2026-09-28",
+  "data_atualizacao": "2026-09-29T16:45:40.111186",
+  "data_ini": "2023-09-30",
+  "data_fim": "2026-09-29",
   "anos_historico": 3,
   "n_fundos": 15,
   "n_dias": 750,
-  "ultima_cota": "2026-09-24",
+  "ultima_cota": "2026-09-25",
   "fundos": [
     "Squadra Long Biased FIF Cotas FIA",
     "Real Investor FIC FIF Ações RL",
