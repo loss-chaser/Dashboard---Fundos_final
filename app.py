@@ -1,4 +1,4 @@
-# app.py — Dashboard AWR Capital (Dash/Plotly)
+# app.py — Dashboard AWR Capital (Dash + gráficos ECharts via echarts_awr.py)
 # Equivalente Python do app Shiny do Emerson, com os fundos do calculos.py
 #
 # Abas:
@@ -22,12 +22,14 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 os.chdir(_SCRIPT_DIR)
 sys.path.insert(0, str(_SCRIPT_DIR))
 
+import math
+
 import dash
 from dash import dcc, html, Input, Output, State, callback_context, dash_table
-import plotly.graph_objects as go
-import plotly.express as px
 import numpy as np
 import pandas as pd
+
+import echarts_awr as ea
 
 from config import (
     CNPJ_AWR, NOME_AWR, CNPJ_PARA_NOME, FUNDOS, CNPJ_FMT,
@@ -70,6 +72,74 @@ def cor_sinal(v):
     if v is None or not np.isfinite(v):
         return "#999"
     return COR_POSITIVO if v >= 0 else COR_NEGATIVO
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GRÁFICOS (ECharts, padrão AWR — módulo echarts_awr.py ao lado deste arquivo)
+# ─────────────────────────────────────────────────────────────────────────────
+# Tema escuro do módulo com as cores deste app: os gráficos moram num card
+# #111318 (mesmo dos cards de KPI) sobre a página #0A0B0E.
+COR_CARD_GRAFICO = "#111318"
+TEMA_GRAF = ea.tema_com(
+    ea.TEMA_ESCURO,
+    superficie=COR_CARD_GRAFICO,
+    texto1="#EFF1F5", texto2="#C7CDD8", texto3="#9AA5B4",
+    tooltip_fundo="#0A0B0E", tooltip_borda="#2A3040",
+    tooltip_sombra="0 6px 22px rgba(0,0,0,.6)",
+    etiqueta_fundo="#2A3040", etiqueta_texto="#EFF1F5",
+    destaque=COR_AWR, destaque_claro="#E3C896", destaque_escuro="#9C8557",
+    ponteiro="rgba(227,200,150,0.5)", sombra_barra="rgba(200,169,110,0.10)",
+    zoom_selecao="rgba(200,169,110,0.16)",
+    positivo=COR_POSITIVO, negativo=COR_NEGATIVO,
+    sucesso=COR_POSITIVO, perigo=COR_NEGATIVO,
+    outros=COR_OUTROS,
+    # correlação: azul (negativa) <-> neutro <-> dourado (positiva)
+    div_neg="#3987e5", div_meio="#2A3040", div_pos="#C8A96E",
+)
+
+# Cor de cada entidade, montada UMA vez com a lista completa (filtro/período
+# nunca repinta ninguém). CORES_FUNDOS manda; fundo novo sem cor fixa pega a
+# próxima cor da paleta do tema.
+CORES_ENTIDADES = ea.mapa_cores(
+    list(FUNDOS) + ["CDI", "Ibovespa"], TEMA_GRAF,
+    fixas={**CORES_FUNDOS, "CDI": COR_CDI, "Ibovespa": COR_IBOV},
+)
+
+# Estrela (benchmarks no Risco × Retorno)
+_SIMBOLO_ESTRELA = ("path://M50,2 L61,36 L97,36 L68,57 L79,92 L50,71 L21,92 L32,57 "
+                    "L3,36 L39,36 Z")
+
+_ESTILO_CARD_GRAFICO = {
+    "backgroundColor": COR_CARD_GRAFICO,
+    "border": "1px solid #1E2330",
+    "borderRadius": "8px",
+    "padding": "16px 18px 10px",
+    "boxShadow": "0 2px 12px rgba(0,0,0,0.35)",
+}
+
+
+def _card_grafico(*children):
+    return html.Div(style=_ESTILO_CARD_GRAFICO, children=list(children))
+
+
+def _titulo_grafico(texto, sub=None):
+    """Título (e subtítulo) dentro do gráfico, no topo à esquerda."""
+    t = TEMA_GRAF
+    tt = {"text": texto, "left": 0, "top": 0, "itemGap": 6,
+          "textStyle": {"color": t["texto1"], "fontSize": 15, "fontWeight": 600,
+                        "fontFamily": t["fonte"]}}
+    if sub:
+        tt["subtext"] = sub
+        tt["subtextStyle"] = {"color": t["texto3"], "fontSize": 11, "fontFamily": t["fonte"]}
+    return tt
+
+
+def _num_ou_none(v):
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -989,129 +1059,209 @@ def _tab_risco_retorno_inner(d):
     if m.empty:
         return html.Div("Sem dados para o período.", style={"color": "#5E6A7A", "padding": "20px"})
 
-    fig = go.Figure()
+    opt = _opcao_risco_retorno(d)
+    if opt is None:
+        return html.Div("Sem dados para o período.", style={"color": "#5E6A7A", "padding": "20px"})
+    return _card_grafico(ea.dash_grafico(opt, _ALTURA_RISCO_RETORNO, TEMA_GRAF, id="graf-risco-retorno"))
 
-    # Peers
-    pares = m[m["Fundo"] != NOME_AWR].copy()
-    if not pares.empty:
-        fig.add_trace(go.Scatter(
-            x=pares["Vol_ann"],
-            y=pares["Ret_ann"],
-            mode="markers",
-            marker=dict(
-                size=9,
-                color=COR_OUTROS,
-                opacity=0.55,
-            ),
-            text=pares["Fundo"],
-            customdata=[
-                [sh, dd, CNPJ_FMT.get(nome, "—")]
-                for sh, dd, nome in zip(
-                    pares["Sharpe"].fillna(0),
-                    pares["DD_max"].fillna(0),
-                    pares["Fundo"],
-                )
-            ],
-            hovertemplate=(
-                "<b>%{text}</b><br>"
-                "CNPJ %{customdata[2]}<br>"
-                "Ret ann: %{y:.1%}<br>"
-                "Vol ann: %{x:.1%}<br>"
-                "Sharpe: %{customdata[0]:.2f}<br>"
-                "DD máx: %{customdata[1]:.1%}<br>"
-                "<extra></extra>"
-            ),
-            name="Peers",
-        ))
 
-    # AWR
-    awr = m[m["Fundo"] == NOME_AWR]
-    if not awr.empty:
-        fig.add_trace(go.Scatter(
-            x=awr["Vol_ann"],
-            y=awr["Ret_ann"],
-            mode="markers+text",
-            marker=dict(size=18, color=COR_AWR, line=dict(width=2, color="#FFF")),
-            text=["AWR"],
-            textposition="top center",
-            textfont=dict(color=COR_AWR, size=12, family="DM Sans"),
-            hovertemplate=(
-                "<b>AWR Capital</b><br>"
-                f"CNPJ {CNPJ_FMT.get(NOME_AWR, '—')}<br>"
-                f"Ret ann: {fmt_pct(awr['Ret_ann'].iloc[0])}<br>"
-                f"Vol ann: {fmt_pct(awr['Vol_ann'].iloc[0])}<br>"
-                f"Sharpe: {fmt_num(awr['Sharpe'].iloc[0])}<br>"
-                "<extra></extra>"
-            ),
-            name="AWR Capital",
-        ))
+_ALTURA_RISCO_RETORNO = 600
+
+# Tooltip do Risco × Retorno: nome, retorno, vol e as linhas extras do ponto
+# (CNPJ, Sharpe, DD) — o mesmo que o hover antigo mostrava.
+_TIP_RISCO_RETORNO = ea.JS(
+    "function(p){var d=p.data||{},v=d.value||[],a=d.awr||{};"
+    "var h=AWR.cab(d.name||p.name)"
+    "+AWR.linha(p.color,'retorno anualizado',AWR.fmt('pctf')(v[1]))"
+    "+AWR.linha('transparent','volatilidade anualizada',AWR.fmt('pctf')(v[0]));"
+    "(a.linhas||[]).forEach(function(l){h+=AWR.linha('transparent',l[0],AWR.esc(l[1]));});"
+    "return h;}"
+)
+
+
+def _opcao_risco_retorno(d):
+    """Dispersão vol × retorno anualizados: peers (cinza), AWR (dourado) e
+    CDI/Ibovespa como estrelas. None se não houver ponto nenhum."""
+    t = TEMA_GRAF
+    m = d["metricas"]
+    pontos = []
+
+    def _extras(r):
+        return [("CNPJ", CNPJ_FMT.get(r["Fundo"], "—")),
+                ("Sharpe", ea.formatar(_num_ou_none(r["Sharpe"]), "num:2")),
+                ("DD máx.", ea.formatar(_num_ou_none(r["DD_max"]), "pctf"))]
+
+    # Ordem das séries = ordem de desenho: peers embaixo, AWR por cima de tudo
+    for _, r in m[m["Fundo"] != NOME_AWR].iterrows():
+        x, y = _num_ou_none(r["Vol_ann"]), _num_ou_none(r["Ret_ann"])
+        if x is None or y is None:
+            continue
+        pontos.append({"nome": r["Fundo"], "x": x, "y": y, "grupo": "Peers", "extras": _extras(r)})
 
     # Benchmarks (CDI e Ibov) como estrelas
+    from metrics import retorno_anualizado as ra_fn, vol_anualizada as va_fn
     cdi_s = d.get("cdi_series")
     if cdi_s is not None and len(cdi_s) > 20:
-        from metrics import retorno_anualizado as ra_fn, vol_anualizada as va_fn
-        cdi_ra = ra_fn(cdi_s)
-        cdi_va = va_fn(cdi_s)
-        if np.isfinite(cdi_ra) and np.isfinite(cdi_va):
-            fig.add_trace(go.Scatter(
-                x=[cdi_va], y=[cdi_ra],
-                mode="markers+text",
-                marker=dict(size=18, symbol="star", color=COR_CDI,
-                            line=dict(width=1.5, color="#FFF")),
-                text=["CDI"], textposition="top center",
-                textfont=dict(color=COR_CDI, size=11),
-                name="CDI",
-                hovertemplate=f"<b>CDI</b><br>Ret ann: {fmt_pct(cdi_ra)}<br>Vol ann: {fmt_pct(cdi_va)}<extra></extra>",
-            ))
-
+        cdi_ra, cdi_va = _num_ou_none(ra_fn(cdi_s)), _num_ou_none(va_fn(cdi_s))
+        if cdi_ra is not None and cdi_va is not None:
+            pontos.append({"nome": "CDI", "x": cdi_va, "y": cdi_ra, "grupo": "CDI"})
     ret_ibov = d["ret_diarios"].get("Ibovespa")
     if ret_ibov is not None and len(ret_ibov.dropna()) > 20:
-        from metrics import retorno_anualizado as ra_fn, vol_anualizada as va_fn
-        ib_ra = ra_fn(ret_ibov.dropna())
-        ib_va = va_fn(ret_ibov.dropna())
-        if np.isfinite(ib_ra) and np.isfinite(ib_va):
-            fig.add_trace(go.Scatter(
-                x=[ib_va], y=[ib_ra],
-                mode="markers+text",
-                marker=dict(size=18, symbol="star", color=COR_IBOV,
-                            line=dict(width=1.5, color="#FFF")),
-                text=["IBOV"], textposition="top center",
-                textfont=dict(color=COR_IBOV, size=11),
-                name="Ibovespa",
-                hovertemplate=f"<b>Ibovespa</b><br>Ret ann: {fmt_pct(ib_ra)}<br>Vol ann: {fmt_pct(ib_va)}<extra></extra>",
-            ))
+        ib_ra, ib_va = _num_ou_none(ra_fn(ret_ibov.dropna())), _num_ou_none(va_fn(ret_ibov.dropna()))
+        if ib_ra is not None and ib_va is not None:
+            pontos.append({"nome": "Ibovespa", "x": ib_va, "y": ib_ra, "grupo": "Ibovespa"})
 
-    fig.update_layout(
-        template="plotly_dark",
-        paper_bgcolor="#0A0B0E",
-        plot_bgcolor="#111318",
-        title=dict(
-            text="Risco × Retorno (anualizados)",
-            font=dict(size=15, color="#EFF1F5", family="Inter"),
-        ),
-        xaxis=dict(
-            title="Volatilidade anualizada", tickformat=".0%",
-            gridcolor="#1A1F2B", ticklen=0, tickfont=dict(color="#5E6A7A"),
-        ),
-        yaxis=dict(
-            title="Retorno anualizado", tickformat=".0%",
-            gridcolor="#1A1F2B", ticklen=0, tickfont=dict(color="#5E6A7A"),
-            zeroline=True, zerolinecolor="#2A3040",
-        ),
-        legend=dict(orientation="h", y=-0.15, font=dict(size=11, color="#5E6A7A")),
-        margin=dict(l=60, r=30, t=60, b=80),
-        hoverlabel=dict(
-            bgcolor="#111318", font_size=12,
-            font_family="Inter", bordercolor="#1E2330",
-        ),
+    for _, r in m[m["Fundo"] == NOME_AWR].iterrows():
+        x, y = _num_ou_none(r["Vol_ann"]), _num_ou_none(r["Ret_ann"])
+        if x is not None and y is not None:
+            pontos.append({"nome": NOME_AWR, "x": x, "y": y, "grupo": NOME_AWR, "extras": _extras(r)})
+
+    if not pontos:
+        return None
+
+    ys = [p["y"] for p in pontos]
+    refs_y = [{"valor": 0, "rotulo": ""}] if min(ys) < 0 < max(ys) else None
+    opt = ea.dispersao(
+        pontos, fmt_x="pctf", fmt_y="pctf",
+        nome_x="Volatilidade anualizada", nome_y="Retorno anualizado",
+        tema=t, refs_y=refs_y,
+        title=_titulo_grafico("Risco × Retorno (anualizados)"),
+        grid={"top": 76},
+        xAxis={"min": 0},                  # volatilidade não é negativa (o CDI fica ~0%)
+        tooltip={"formatter": _TIP_RISCO_RETORNO},
     )
 
-    return dcc.Graph(figure=fig, style={"height": "600px"})
+    rotulo_forte = {"show": True, "position": "top", "distance": 8, "color": t["texto1"],
+                    "fontWeight": 700, "fontSize": 12, "fontFamily": t["fonte"]}
+    estilos = {
+        "Peers": {"cor": COR_OUTROS, "tam": 11, "simbolo": "circle",
+                  "rotulo": {"show": True, "position": "right", "color": t["texto3"], "fontSize": 11,
+                             "formatter": ea.JS("function(p){return (p.data&&p.data.curto)||p.name;}")}},
+        # CDI fica colado no eixo Y (vol ~0%): rótulo à direita, longe dos ticks
+        "CDI": {"cor": CORES_ENTIDADES["CDI"], "tam": 20, "simbolo": _SIMBOLO_ESTRELA,
+                "rotulo": dict(rotulo_forte, formatter="CDI", position="right")},
+        "Ibovespa": {"cor": CORES_ENTIDADES["Ibovespa"], "tam": 20, "simbolo": _SIMBOLO_ESTRELA,
+                     "rotulo": dict(rotulo_forte, formatter="IBOV")},
+        NOME_AWR: {"cor": COR_AWR, "tam": 18, "simbolo": "circle",
+                   "rotulo": dict(rotulo_forte, formatter="AWR")},
+    }
+    for s in opt["series"]:
+        # rótulo encavalado some (hideOverlap do dispersao); o de ponto maior
+        # (AWR, estrelas) tem prioridade
+        e = estilos.get(s["name"])
+        if not e:
+            continue
+        s["symbol"] = e["simbolo"]
+        s["symbolSize"] = e["tam"]
+        s["itemStyle"] = dict(s["itemStyle"], color=e["cor"])
+        s["label"] = dict(s["label"], **e["rotulo"])
+        if s["name"] == "Peers":
+            s["itemStyle"]["opacity"] = 0.9
+            for it in s["data"]:
+                it["curto"] = _short_nome(it["name"])
+        if s["name"] == NOME_AWR:
+            s["z"] = 5
+
+    ordem = [NOME_AWR, "Peers", "CDI", "Ibovespa"]
+    presentes = {s["name"] for s in opt["series"]}
+    opt["legend"] = ea.legenda(t, tipo="barra", top=36, data=[
+        {"name": n, "icon": (_SIMBOLO_ESTRELA if n in ("CDI", "Ibovespa") else "circle")}
+        for n in ordem if n in presentes
+    ], itemWidth=14, itemHeight=14)
+    return opt
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TAB 2: EVOLUÇÃO (cota base 100)
 # ─────────────────────────────────────────────────────────────────────────────
+_ALTURA_EVOLUCAO = 600
+_TRACO_EVOLUCAO = {"CDI": "dotted", "Ibovespa": "dashed"}
+
+
+def _tip_evolucao(cab):
+    """Tooltip da evolução: data por extenso e uma linha por série (ordenada
+    pelo valor), com o CNPJ do fundo — o que o hover antigo mostrava."""
+    o = {"cab": list(cab), "cnpj": CNPJ_FMT, "traco": _TRACO_EVOLUCAO, "awr": NOME_AWR}
+    return ea.JS(
+        "(function(o){var T=AWR.T,f=AWR.fmt('num:2');"
+        "function lin(p){var v=p.value;if(Array.isArray(v))v=v[v.length-1];"
+        "if(v===null||v===undefined||v==='-'||!isFinite(v))return null;"
+        "var tr=o.traco[p.seriesName]||'solid',c=o.cnpj[p.seriesName],awr=p.seriesName===o.awr;"
+        "return [+v,'<div style=\"display:flex;align-items:center;gap:8px;margin-top:4px\">'"
+        "+'<span style=\"display:inline-block;width:12px;height:0;border-top:2px '+tr+' '+p.color+';flex:none\"></span>'"
+        "+'<b style=\"font-size:13px;font-weight:700;color:'+T.texto1+';min-width:48px\">'+f(v)+'</b>'"
+        "+'<span style=\"color:'+(awr?T.texto1+';font-weight:600':T.texto3)+'\">'+AWR.esc(p.seriesName)+'</span>'"
+        "+(c?'<span style=\"color:'+T.texto3+';opacity:.75;font-size:10.5px;margin-left:auto;padding-left:14px\">'+c+'</span>':'')"
+        "+'</div>'];}"
+        "return function(ps){if(!Array.isArray(ps))ps=[ps];if(!ps.length)return '';"
+        "var i=ps[0].dataIndex,h=AWR.cab(o.cab[i]!=null?o.cab[i]:ps[0].axisValueLabel),rows=[];"
+        "ps.forEach(function(p){var r=lin(p);if(r)rows.push(r);});"
+        "rows.sort(function(a,b){return b[0]-a[0];});"
+        "rows.forEach(function(r){h+=r[1];});"
+        "return h+AWR.nota('cota base 100');};"
+        "})(%s)" % ea.para_json(o)
+    )
+
+
+def _opcao_evolucao(cota, cdi_acum):
+    """Linhas base 100: peers na cor de cada fundo (CORES_FUNDOS), CDI
+    pontilhado, Ibovespa tracejado e o AWR mais grosso, por cima."""
+    t = TEMA_GRAF
+    idx = cota.index
+    cdi_100 = None
+    if cdi_acum is not None and len(cdi_acum) > 0:
+        cdi_100 = (1 + cdi_acum) * 100
+        idx = idx.union(cdi_100.index)      # o CDI tem as próprias datas
+    base = cota.reindex(idx)
+
+    def _dados(s):
+        return [round(float(v), 4) if np.isfinite(v) else None for v in s.to_numpy(dtype=float)]
+
+    series = []
+    for col in base.columns:
+        if col in (NOME_AWR, "Ibovespa"):
+            continue
+        series.append({"nome": col, "dados": _dados(base[col]),
+                       "cor": CORES_ENTIDADES.get(col, COR_OUTROS), "largura": 1.5})
+    if cdi_100 is not None:
+        # conectar: os buracos do CDI são só do reindex nas datas dos fundos
+        series.append({"nome": "CDI", "dados": _dados(cdi_100.reindex(idx)),
+                       "cor": CORES_ENTIDADES["CDI"], "largura": 2, "pontilhado": True,
+                       "conectar": True})
+    if "Ibovespa" in base.columns:
+        series.append({"nome": "Ibovespa", "dados": _dados(base["Ibovespa"]),
+                       "cor": CORES_ENTIDADES["Ibovespa"], "largura": 2, "tracejado": True})
+    if NOME_AWR in base.columns:
+        series.append({"nome": NOME_AWR, "dados": _dados(base[NOME_AWR]),
+                       "cor": COR_AWR, "largura": 3})
+
+    x = ea.rotulos_data(idx, "dia_ano")
+    cab = ea.rotulos_data(idx, "completo")
+    curtos = {s["nome"]: (_short_nome(s["nome"]) if s["nome"] in FUNDOS else s["nome"]) for s in series}
+    opt = ea.linha(
+        x, series, fmt="num:2", fmt_eixo="num", tema=t, escala=True, rotulo_final=False, cab=cab,
+        title=_titulo_grafico("Evolução comparada (base 100)"),
+        grid={"top": 48, "right": 170},
+        tooltip={"formatter": _tip_evolucao(cab)},
+    )
+    for s in opt["series"]:
+        if s["name"] == NOME_AWR:
+            s["z"] = 5                      # AWR por cima de todas
+    # Legenda na lateral (17 séries não cabem numa linha): nome curto; o
+    # tooltip mostra o nome inteiro + CNPJ. Clicar esconde/mostra a série.
+    # Ordem fixa na legenda: AWR, benchmarks e os peers na ordem do config.
+    presentes = [s["nome"] for s in series]
+    ordem = [n for n in [NOME_AWR, "CDI", "Ibovespa"] + list(FUNDOS) if n in presentes]
+    ordem += [n for n in presentes if n not in ordem]
+    opt["legend"] = ea.legenda(
+        t, tipo="linha", orient="vertical", left="auto", right=0, top=48, bottom=40, itemGap=11,
+        data=ordem,
+        formatter=ea.JS("function(n){var m=%s;return m[n]||n;}" % ea.para_json(curtos)),
+        textStyle={"width": 140, "overflow": "truncate"},
+    )
+    return opt
+
+
 def _tab_evolucao(d):
     cota = d["cota100"]
     cdi_acum = d.get("cdi_acum")
@@ -1120,95 +1270,8 @@ def _tab_evolucao(d):
     if cota.empty:
         return html.Div("Sem dados.", style={"color": "#666"})
 
-    fig = go.Figure()
-
-    # Peers (cinza, finos)
-    # Peers — cada um com sua própria cor
-    for col in cota.columns:
-        if col in (NOME_AWR, "Ibovespa"):
-            continue
-        cor = CORES_FUNDOS.get(col, COR_OUTROS)
-        fig.add_trace(go.Scatter(
-            x=cota.index, y=cota[col],
-            mode="lines",
-            line=dict(color=cor, width=1.5),
-            opacity=0.8,
-            name=col,
-            showlegend=True,
-            hoverlabel=dict(bgcolor="#111318", bordercolor=cor, font_color=cor, font_size=12, font_family="Inter"),
-            hovertemplate=(
-                f"<b>{col}</b><br>CNPJ {CNPJ_FMT.get(col, '—')}"
-                "<br>%{x|%d/%m/%Y}<br>Base 100: %{y:.2f}<extra></extra>"
-            ),
-        ))
-
-    # CDI acumulado → cota 100
-    if cdi_acum is not None and len(cdi_acum) > 0:
-        cdi_100 = (1 + cdi_acum) * 100
-        fig.add_trace(go.Scatter(
-            x=cdi_100.index, y=cdi_100.values,
-            mode="lines",
-            line=dict(color=COR_CDI, width=2, dash="dot"),
-            name="CDI",
-            hoverlabel=dict(bgcolor="#111318", bordercolor=COR_CDI, font_color=COR_CDI, font_size=12, font_family="Inter"),
-            hovertemplate="<b>CDI</b><br>%{x|%d/%m/%Y}<br>Base 100: %{y:.2f}<extra></extra>",
-        ))
-
-    # Ibovespa
-    if "Ibovespa" in cota.columns:
-        fig.add_trace(go.Scatter(
-            x=cota.index, y=cota["Ibovespa"],
-            mode="lines",
-            line=dict(color=COR_IBOV, width=2, dash="dash"),
-            name="Ibovespa",
-            hoverlabel=dict(bgcolor="#111318", bordercolor=COR_IBOV, font_color=COR_IBOV, font_size=12, font_family="Inter"),
-            hovertemplate="<b>Ibovespa</b><br>%{x|%d/%m/%Y}<br>Base 100: %{y:.2f}<extra></extra>",
-        ))
-
-    # AWR (destaque — mais grosso, por cima)
-    if NOME_AWR in cota.columns:
-        fig.add_trace(go.Scatter(
-            x=cota.index, y=cota[NOME_AWR],
-            mode="lines",
-            line=dict(color=COR_AWR, width=3.5),
-            name=NOME_AWR,
-            hoverlabel=dict(bgcolor="#111318", bordercolor=COR_AWR, font_color=COR_AWR, font_size=12, font_family="Inter"),
-            hovertemplate=(
-                f"<b>{NOME_AWR}</b><br>CNPJ {CNPJ_FMT.get(NOME_AWR, '—')}"
-                "<br>%{x|%d/%m/%Y}<br>Base 100: %{y:.2f}<extra></extra>"
-            ),
-        ))
-
-    fig.update_layout(
-        template="plotly_dark",
-        paper_bgcolor="#0A0B0E",
-        plot_bgcolor="#111318",
-        title=dict(
-            text="Evolução comparada (base 100)",
-            font=dict(size=15, color="#EFF1F5", family="Inter"),
-        ),
-        xaxis=dict(title="", gridcolor="#1A1F2B", ticklen=0, tickfont=dict(color="#5E6A7A")),
-        yaxis=dict(
-            title="Base 100", gridcolor="#1A1F2B",
-            ticklen=0, tickfont=dict(color="#5E6A7A"),
-        ),
-        legend=dict(
-            orientation="h",
-            y=-0.30,
-            font=dict(size=9, color="#5E6A7A"),
-            itemwidth=30,
-            tracegroupgap=0,
-        ),
-        margin=dict(l=60, r=30, t=60, b=160),
-        hovermode="closest",
-        hoverlabel=dict(
-            bgcolor="#111318", font_size=12,
-            font_family="Inter", bordercolor="#1E2330",
-            namelength=-1,
-        ),
-    )
-
-    grafico = dcc.Graph(figure=fig, style={"height": "600px"})
+    grafico = _card_grafico(ea.dash_grafico(_opcao_evolucao(cota, cdi_acum), _ALTURA_EVOLUCAO,
+                                            TEMA_GRAF, id="graf-evolucao"))
 
     # ── Tabela de cotas usadas no cálculo ──
     if df_cotas_raw is None or df_cotas_raw.empty:
@@ -1334,6 +1397,102 @@ def _tab_evolucao(d):
 # ─────────────────────────────────────────────────────────────────────────────
 # TAB 3: DISTRIBUIÇÃO (histograma)
 # ─────────────────────────────────────────────────────────────────────────────
+_ALTURA_DIST = 500
+_LABEL_METRICA = {
+    "Ret_acum": "Retorno acumulado", "Ret_ann": "Retorno anualizado",
+    "Vol_ann": "Volatilidade ann.", "Sharpe": "Sharpe", "Sortino": "Sortino",
+    "DD_max": "Drawdown máximo", "Pct_meses_pos": "% meses positivos",
+}
+
+_TIP_HISTOGRAMA = ea.JS(
+    "function(p){var d=p.data||{},a=d.awr||{},n=(d.value||[])[1]||0;"
+    "var h=AWR.cab(a.titulo||'')+AWR.linha(p.color,n===1?'fundo':'fundos',String(n))"
+    "+AWR.linha('transparent','dos peers',AWR.esc(a.pct||''));"
+    "if(a.fundos&&a.fundos.length){h+='<div style=\"color:'+AWR.T.texto3+';font-size:11px;"
+    "margin-top:6px;line-height:1.55\">'+a.fundos.map(AWR.esc).join('<br>')+'</div>';}"
+    "return h;}"
+)
+
+
+def _passo_bonito(bruto):
+    """Largura 'redonda' de faixa (1; 2; 2,5; 5 x 10^k), >= bruto."""
+    if not (bruto > 0):
+        return 1.0
+    e = 10 ** math.floor(math.log10(bruto))
+    for mult in (1, 2, 2.5, 5, 10):
+        if bruto <= mult * e * (1 + 1e-9):
+            return mult * e
+    return 10 * e
+
+
+def _opcao_histograma(valores, nomes, awr_val, metric_col, is_pct):
+    """Histograma dos peers (faixas de largura redonda, eixo X numérico) com o
+    AWR marcado na posição exata. None se nenhum peer tiver a métrica."""
+    t = TEMA_GRAF
+    fmt = "pctf" if is_pct else "num:2"
+    rotulo = _LABEL_METRICA.get(metric_col, metric_col)
+    pts = [(float(v), n) for v, n in zip(valores, nomes) if _num_ou_none(v) is not None]
+    if not pts:
+        return None
+    awr_ok = _num_ou_none(awr_val)
+
+    # Faixas: mesmo nº-alvo do histograma antigo (nbinsx), cobrindo peers + AWR
+    extremos = [v for v, _ in pts] + ([awr_ok] if awr_ok is not None else [])
+    lo, hi = min(extremos), max(extremos)
+    alvo = max(8, int(len(pts) ** 0.5 * 2))
+    passo = _passo_bonito((hi - lo) / alvo) if hi - lo > 1e-12 else _passo_bonito(abs(lo) * 0.2 or 1.0)
+    ini = math.floor(lo / passo + 1e-9) * passo
+    k = max(1, int(math.floor((hi - ini) / passo + 1e-9)) + 1)
+    fmt_faixa = fmt
+    if is_pct:
+        fmt_faixa = "pctf:0" if abs(passo * 100 - round(passo * 100)) < 1e-9 else "pctf:1"
+
+    grupos = [[] for _ in range(k)]
+    for v, n in pts:
+        j = min(max(int(math.floor((v - ini) / passo + 1e-9)), 0), k - 1)
+        grupos[j].append((v, n))
+    tot = len(pts)
+    dados = []
+    for j in range(k):
+        a, b = ini + j * passo, ini + (j + 1) * passo
+        dados.append({
+            "value": [round(a + passo / 2, 10), len(grupos[j])],
+            "awr": {"titulo": f"{ea.formatar(a, fmt_faixa)} a {ea.formatar(b, fmt_faixa)}",
+                    "pct": ea.pct(len(grupos[j]) / tot * 100, 0),
+                    "fundos": [f"{_short_nome(n)}  ·  {ea.formatar(v, fmt)}"
+                               for v, n in sorted(grupos[j], reverse=True)]},
+        })
+
+    serie = {"name": "_serie", "type": "bar", "data": dados,
+             "barCategoryGap": "6%", "barMaxWidth": 400,
+             "itemStyle": {"color": COR_OUTROS, "borderRadius": [3, 3, 0, 0]},
+             "emphasis": {"itemStyle": {"color": "#8A94A6"}}}
+    if awr_ok is not None:
+        ml = ea.referencias([{"valor": awr_ok, "rotulo": f"AWR: {ea.formatar(awr_ok, fmt)}",
+                              "cor": COR_AWR}], t, eixo="x", posicao="end")
+        ml["lineStyle"] = {"type": "solid", "width": 2.5, "opacity": 1}
+        ml["label"].update({"fontWeight": 600, "fontSize": 12})
+        for it in ml["data"]:
+            it["label"]["color"] = t["texto1"]
+        serie["markLine"] = ml
+
+    fim = ini + k * passo
+    opt = ea.base(t)
+    opt.update({
+        "title": _titulo_grafico(f"Distribuição — {rotulo}",
+                                 "nº de peers por faixa  ·  a linha dourada marca o AWR"),
+        "grid": ea.grade(t, topo=72, direita=24, base_=34, esquerda=40),
+        "xAxis": ea.eixo_valor(fmt_faixa, t, nome=rotulo, nameGap=30,
+                               min=round(ini, 10), max=round(fim, 10), interval=passo,
+                               splitLine={"show": False},
+                               axisLine={"show": True, "lineStyle": {"color": t["eixo"]}}),
+        "yAxis": ea.eixo_valor("num", t, nome="Nº de fundos", minInterval=1, nameGap=30),
+        "tooltip": dict(ea.tooltip_item("num", t), formatter=_TIP_HISTOGRAMA),
+        "series": [serie],
+    })
+    return opt
+
+
 def _tab_distribuicao(d, current_metric=_DEFAULT_METRIC):
     m = d["metricas"]
     if m.empty:
@@ -1352,7 +1511,7 @@ def _tab_distribuicao(d, current_metric=_DEFAULT_METRIC):
                 for lbl, key in METRIC_OPCOES
             ],
         ),
-        dcc.Graph(id="dist-graph", style={"height": "500px"}),
+        _card_grafico(ea.dash_iframe_vazio("dist-graph", _ALTURA_DIST)),
     ])
 
 
@@ -1379,20 +1538,20 @@ def mudar_metrica(*_):
 
 
 @app.callback(
-    Output("dist-graph", "figure"),
+    Output("dist-graph", "srcDoc"),
     Input("dist-metric", "data"),
     Input("store-data", "data"),
     Input("active-tab", "data"),
 )
 def update_dist(metric_col, cache_key, active_tab):
     if active_tab != "tab-distribuicao":
-        return go.Figure()
+        return ""
     if not cache_key or cache_key not in _CACHE or not metric_col:
-        return go.Figure()
+        return ea.pagina_aviso("Carregando...", _ALTURA_DIST, TEMA_GRAF)
 
     m = _CACHE[cache_key]["metricas"]
     if m.empty:
-        return go.Figure()
+        return ea.pagina_aviso("Sem dados para o período.", _ALTURA_DIST, TEMA_GRAF)
 
     pares = m[m["Fundo"] != NOME_AWR]
     awr_val = m.loc[m["Fundo"] == NOME_AWR, metric_col]
@@ -1400,57 +1559,10 @@ def update_dist(metric_col, cache_key, active_tab):
 
     is_pct = metric_col in ("Ret_acum", "Ret_ann", "Vol_ann", "DD_max", "Pct_meses_pos")
 
-    fig = go.Figure()
-
-    vals = pares[metric_col].dropna()
-    fig.add_trace(go.Histogram(
-        x=vals,
-        nbinsx=max(8, int(len(vals) ** 0.5 * 2)),
-        marker=dict(color="#1E2330", line=dict(color="#2A3040", width=0.5)),
-        name="Peers",
-        hovertemplate=f"{metric_col}: %{{x:.2{'%' if is_pct else 'f'}}}<br>N: %{{y}}<extra></extra>",
-    ))
-
-    if np.isfinite(awr_val):
-        fig.add_vline(
-            x=awr_val,
-            line=dict(color=COR_AWR, width=3),
-            annotation_text=f"AWR: {fmt_pct(awr_val) if is_pct else fmt_num(awr_val)}",
-            annotation_font=dict(color=COR_AWR, size=12),
-        )
-
-    label_map = {
-        "Ret_acum": "Retorno acumulado", "Ret_ann": "Retorno anualizado",
-        "Vol_ann": "Volatilidade ann.", "Sharpe": "Sharpe", "Sortino": "Sortino",
-        "DD_max": "Drawdown máximo", "Pct_meses_pos": "% meses positivos",
-    }
-
-    fig.update_layout(
-        template="plotly_dark",
-        paper_bgcolor="#0A0B0E",
-        plot_bgcolor="#111318",
-        title=dict(
-            text=f"Distribuição — {label_map.get(metric_col, metric_col)}",
-            font=dict(size=15, color="#EFF1F5", family="Inter"),
-        ),
-        xaxis=dict(
-            title=label_map.get(metric_col, metric_col),
-            tickformat=".1%" if is_pct else ".2f",
-            gridcolor="#1A1F2B", ticklen=0, tickfont=dict(color="#5E6A7A"),
-        ),
-        yaxis=dict(
-            title="Nº de fundos", gridcolor="#1A1F2B",
-            ticklen=0, tickfont=dict(color="#5E6A7A"),
-        ),
-        bargap=0.06,
-        margin=dict(l=60, r=30, t=60, b=60),
-        hoverlabel=dict(
-            bgcolor="#111318", font_size=12,
-            font_family="Inter", bordercolor="#1E2330",
-        ),
-    )
-
-    return fig
+    opt = _opcao_histograma(pares[metric_col], pares["Fundo"], awr_val, metric_col, is_pct)
+    if opt is None:
+        return ea.pagina_aviso("Sem dados desta métrica no período.", _ALTURA_DIST, TEMA_GRAF)
+    return ea.pagina_html(opt, _ALTURA_DIST, TEMA_GRAF)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1678,6 +1790,81 @@ def _short_nome(nome: str) -> str:
     return " ".join(toks[:2])
 
 
+_ALTURA_CORR = 660
+
+
+def _opcao_correlacao(corr, cols):
+    """Mapa de calor da correlação (escala fixa −1..+1) com a linha e a coluna
+    do AWR contornadas em dourado e o rótulo do AWR destacado nos eixos."""
+    t = TEMA_GRAF
+    n = len(cols)
+    labels, vistos = [], set()
+    for c in cols:
+        lb = ("★ " + _short_nome(c)) if c == NOME_AWR else _short_nome(c)
+        base_lb, k = lb, 2
+        while lb in vistos:                  # nome curto repetido colapsaria a categoria
+            lb, k = f"{base_lb} ({k})", k + 1
+        vistos.add(lb)
+        labels.append(lb)
+
+    z = corr.values.astype(float)
+    matriz = [[(round(float(v), 4) if np.isfinite(v) else None) for v in lin] for lin in z]
+    opt = ea.mapa_calor(labels, labels, matriz, fmt="num:2", minimo=-1, maximo=1, tema=t)
+
+    # (a cor do texto de cada célula — clara ou escura — o mapa_calor já escolhe
+    # pelo contraste com a cor real da célula)
+    opt["series"][0]["label"]["fontSize"] = 11 if n <= 10 else 10
+
+    # Subtítulo: com quem o AWR está mais / menos correlacionado
+    subt = None
+    if NOME_AWR in cols:
+        s = corr[NOME_AWR].drop(labels=[NOME_AWR], errors="ignore").dropna()
+        if not s.empty:
+            subt = (f"AWR  ·  + correlacionado: {_short_nome(s.idxmax())} "
+                    f"({ea.formatar(s.max(), 'num:2')})   ·   − correlacionado: "
+                    f"{_short_nome(s.idxmin())} ({ea.formatar(s.min(), 'num:2')})")
+    opt["title"] = _titulo_grafico("Matriz de correlação", subt)
+    opt["grid"]["top"] = 66 if subt else 42
+
+    # rótulo do AWR em destaque nos dois eixos
+    rich = {"awr": {"color": t["texto1"], "fontWeight": 700, "fontFamily": t["fonte"], "fontSize": 11,
+                    "backgroundColor": "rgba(200,169,110,0.16)", "padding": [3, 6], "borderRadius": 3}}
+    fmt_rot = ea.JS("function(v){v=String(v);return v.charAt(0)==='★'?'{awr|'+v+'}':v;}")
+    for eixo in ("xAxis", "yAxis"):
+        opt[eixo]["axisLabel"].update({"formatter": fmt_rot, "rich": rich})
+
+    # Faixa do AWR (linha + coluna) contornada em dourado: série custom que
+    # desenha 2 retângulos de borda a borda das células (markArea não serve:
+    # no eixo de categoria uma faixa de 1 célula tem altura zero e some).
+    if NOME_AWR in cols:
+        ia = cols.index(NOME_AWR)
+        opt["series"].append({
+            "name": "_faixa_awr", "type": "custom", "data": [[0, 0]], "silent": True, "z": 10,
+            "tooltip": {"show": False}, "animation": False, "clip": False,
+            "renderItem": ea.JS(
+                "function(params,api){var n=%d,i=%d,s=api.size([1,1]),"
+                "a=api.coord([0,0]),b=api.coord([n-1,n-1]),r=api.coord([i,i]),"
+                "x0=Math.min(a[0],b[0])-s[0]/2,y0=Math.min(a[1],b[1])-s[1]/2,"
+                "st={fill:'none',stroke:'%s',lineWidth:2.5};"
+                "return {type:'group',children:["
+                "{type:'rect',shape:{x:x0,y:r[1]-s[1]/2,width:n*s[0],height:s[1]},style:st},"
+                "{type:'rect',shape:{x:r[0]-s[0]/2,y:y0,width:s[0],height:n*s[1]},style:st}]};}"
+                % (n, ia, COR_AWR)
+            ),
+        })
+        opt["visualMap"]["seriesIndex"] = 0
+
+    nomes = [c for c in cols]
+    opt["tooltip"]["formatter"] = ea.JS(
+        "(function(N){return function(p){if(p.seriesType!=='heatmap')return '';var v=p.value||[];"
+        "var sem=(v[2]==='-'||v[2]==null);"
+        "return AWR.cab(N[v[1]])+AWR.cab('× '+N[v[0]])"
+        "+AWR.linha(p.color,'correlação',sem?'–':AWR.fmt('num:2')(v[2]))"
+        "+(sem?AWR.nota('menos de 20 dias em comum'):'');};})(%s)" % ea.para_json(nomes)
+    )
+    return opt
+
+
 def _tab_correlacao(d):
     m = d["metricas"]
     if m.empty:
@@ -1712,11 +1899,11 @@ def _tab_correlacao(d):
                 ),
             ],
         ),
-        dcc.Graph(id="corr-heatmap", style={"height": "660px"},
-                  config={"displayModeBar": False}),
+        _card_grafico(ea.dash_iframe_vazio("corr-heatmap", _ALTURA_CORR)),
         html.Div(
-            "Correlação dos retornos diários no período selecionado  ·  "
-            "tons mais dourados = mais correlacionado  ·  a faixa do AWR fica destacada.",
+            "Correlação dos retornos diários no período selecionado  ·  escala de −1 a +1: "
+            "mais dourado = mais correlacionado, azul = correlação negativa  ·  "
+            "a faixa do AWR fica contornada em dourado.",
             style={"color": "#5E6A7A", "fontSize": "11px", "marginTop": "10px",
                    "letterSpacing": "0.3px"},
         ),
@@ -1724,16 +1911,16 @@ def _tab_correlacao(d):
 
 
 @app.callback(
-    Output("corr-heatmap", "figure"),
+    Output("corr-heatmap", "srcDoc"),
     Input("corr-fundos", "value"),
     Input("store-data", "data"),
     Input("active-tab", "data"),
 )
 def update_corr(selected, cache_key, active_tab):
     if active_tab != "tab-correlacao":
-        return go.Figure()
+        return ""
     if not cache_key or cache_key not in _CACHE:
-        return go.Figure()
+        return ea.pagina_aviso("Carregando...", _ALTURA_CORR, TEMA_GRAF)
 
     ret = _CACHE[cache_key]["ret_diarios"]
     selected = selected or []
@@ -1742,80 +1929,11 @@ def update_corr(selected, cache_key, active_tab):
         cols = [NOME_AWR] + [c for c in cols if c != NOME_AWR]
 
     if len(cols) < 2:
-        fig = go.Figure()
-        fig.add_annotation(text="Selecione ao menos 2 fundos para ver a correlação.",
-                           showarrow=False, font=dict(color="#5E6A7A", size=14))
-        fig.update_layout(template="plotly_dark", paper_bgcolor="#0A0B0E",
-                          plot_bgcolor="#0A0B0E", xaxis=dict(visible=False),
-                          yaxis=dict(visible=False), margin=dict(l=20, r=20, t=20, b=20))
-        return fig
+        return ea.pagina_aviso("Selecione ao menos 2 fundos para ver a correlação.", _ALTURA_CORR,
+                               TEMA_GRAF)
 
     corr = ret[cols].corr(min_periods=20)
-    n = len(cols)
-    labels = [("★ " + _short_nome(c)) if c == NOME_AWR else _short_nome(c) for c in cols]
-
-    z = corr.values.astype(float)
-    # zmin dinâmico a partir das correlações fora da diagonal (realça as diferenças)
-    off = z.copy()
-    np.fill_diagonal(off, np.nan)
-    if np.isfinite(off).any():
-        zmin = float(np.floor(np.nanmin(off) * 10) / 10)
-    else:
-        zmin = 0.0
-    zmax = 1.0
-    txt_size = 11 if n <= 8 else (9 if n <= 12 else 8)
-
-    fig = go.Figure(go.Heatmap(
-        z=z, x=labels, y=labels,
-        zmin=zmin, zmax=zmax,
-        colorscale=[[0.0, "#4B5563"], [0.5, "#9C8557"], [1.0, "#E3C896"]],
-        xgap=2, ygap=2,
-        texttemplate="%{z:.2f}",
-        textfont=dict(size=txt_size, color="#0A0B0E", family="JetBrains Mono"),
-        hovertemplate="<b>%{y}</b>  ×  <b>%{x}</b><br>Correlação: %{z:.2f}<extra></extra>",
-        colorbar=dict(
-            title=dict(text="ρ", font=dict(color="#8A94A6", size=12)),
-            tickfont=dict(color="#5E6A7A", size=10),
-            outlinewidth=0, thickness=14, len=0.7,
-        ),
-    ))
-
-    # Destaque da faixa do AWR (linha + coluna)
-    if NOME_AWR in cols:
-        i = cols.index(NOME_AWR)
-        fig.add_shape(type="rect", xref="x", yref="y",
-                      x0=-0.5, x1=n - 0.5, y0=i - 0.5, y1=i + 0.5,
-                      line=dict(color=COR_AWR, width=2.5), fillcolor="rgba(0,0,0,0)", layer="above")
-        fig.add_shape(type="rect", xref="x", yref="y",
-                      x0=i - 0.5, x1=i + 0.5, y0=-0.5, y1=n - 0.5,
-                      line=dict(color=COR_AWR, width=2.5), fillcolor="rgba(0,0,0,0)", layer="above")
-
-    # Subtítulo: com quem o AWR está mais / menos correlacionado
-    subt = ""
-    if NOME_AWR in cols:
-        s = corr[NOME_AWR].drop(labels=[NOME_AWR], errors="ignore").dropna()
-        if not s.empty:
-            subt = (f"AWR · + correlacionado: {_short_nome(s.idxmax())} ({s.max():.2f})"
-                    f"   ·   − correlacionado: {_short_nome(s.idxmin())} ({s.min():.2f})")
-
-    titulo = "Matriz de correlação"
-    if subt:
-        titulo += f"<br><span style='font-size:11px;color:#5E6A7A'>{subt}</span>"
-
-    fig.update_layout(
-        template="plotly_dark",
-        paper_bgcolor="#0A0B0E",
-        plot_bgcolor="#0A0B0E",
-        title=dict(text=titulo, font=dict(size=15, color="#EFF1F5", family="Inter"),
-                   x=0, xanchor="left"),
-        xaxis=dict(tickfont=dict(color="#9AA5B4", size=10), tickangle=-45,
-                   side="bottom", showgrid=False, ticks="", constrain="domain"),
-        yaxis=dict(tickfont=dict(color="#9AA5B4", size=10), autorange="reversed",
-                   showgrid=False, ticks="", scaleanchor="x", constrain="domain"),
-        margin=dict(l=130, r=30, t=80, b=130),
-        hoverlabel=dict(bgcolor="#111318", font_size=12, font_family="Inter", bordercolor="#1E2330"),
-    )
-    return fig
+    return ea.pagina_html(_opcao_correlacao(corr, cols), _ALTURA_CORR, TEMA_GRAF)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
