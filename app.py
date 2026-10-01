@@ -1179,8 +1179,8 @@ _TRACO_EVOLUCAO = {"CDI": "dotted", "Ibovespa": "dashed"}
 
 
 def _tip_evolucao(cab):
-    """Tooltip da evolução: data por extenso e uma linha por série (ordenada
-    pelo valor), com o CNPJ do fundo — o que o hover antigo mostrava."""
+    """Tooltip da evolução: data por extenso e SÓ a série mais perto do mouse
+    (ela acende e as outras apagam - AWR.proximo), com o CNPJ do fundo."""
     o = {"cab": list(cab), "cnpj": CNPJ_FMT, "traco": _TRACO_EVOLUCAO, "awr": NOME_AWR}
     return ea.JS(
         "(function(o){var T=AWR.T,f=AWR.fmt('num:2');"
@@ -1193,12 +1193,9 @@ def _tip_evolucao(cab):
         "+'<span style=\"color:'+(awr?T.texto1+';font-weight:600':T.texto3)+'\">'+AWR.esc(p.seriesName)+'</span>'"
         "+(c?'<span style=\"color:'+T.texto3+';opacity:.75;font-size:10.5px;margin-left:auto;padding-left:14px\">'+c+'</span>':'')"
         "+'</div>'];}"
-        "return function(ps){if(!Array.isArray(ps))ps=[ps];if(!ps.length)return '';"
-        "var i=ps[0].dataIndex,h=AWR.cab(o.cab[i]!=null?o.cab[i]:ps[0].axisValueLabel),rows=[];"
-        "ps.forEach(function(p){var r=lin(p);if(r)rows.push(r);});"
-        "rows.sort(function(a,b){return b[0]-a[0];});"
-        "rows.forEach(function(r){h+=r[1];});"
-        "return h+AWR.nota('cota base 100');};"
+        "return function(ps){var p=AWR.proximo(ps);if(!p)return '';"
+        "var i=p.dataIndex,r=lin(p);if(!r)return '';"
+        "return AWR.cab(o.cab[i]!=null?o.cab[i]:p.axisValueLabel)+r[1]+AWR.nota('cota base 100');};"
         "})(%s)" % ea.para_json(o)
     )
 

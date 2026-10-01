@@ -48,7 +48,9 @@ import json
 import math
 from copy import deepcopy
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
+# 1.3: linha com muitas series -> tooltip so da linha mais perto do mouse
+#      (AWR.proximo / AWR.tipProximo; tooltip_proximo=, extras_series=)
 # 1.1: estilo matplotlib (mpl_*) para PDF/PNG/e-mail
 # 1.2: cascata cruza o zero e aceita subtotal (None); refs esticam o eixo;
 #      barras: rotulo_fmt, textos, margem_direita, vao; linha: conectar_nulos,
@@ -660,7 +662,8 @@ def _esticar_para_refs(dados, refs, eixo_min, eixo_max, escala):
 def linha(x, series, *, fmt="num", fmt_eixo=None, tema=None, area=None, rotulo_final=None,
           refs=None, faixas=None, escala=False, zoom_=None, cab=None, rodape=None, titulo=None,
           legenda_=None, suave=False, empilhar=False, marcadores=False, ordenar_tooltip=None,
-          eixo_min=None, eixo_max=None, conectar_nulos=False, rotulo_nome=False, **extra):
+          eixo_min=None, eixo_max=None, conectar_nulos=False, rotulo_nome=False,
+          tooltip_proximo=None, extras_series=None, **extra):
     """Linha/area no tempo.
     x ........ rotulos do eixo X (use rotulos_data(...) para datas)
     series ... lista de numeros (1 serie) ou [dict(nome, dados, cor=None, fmt=None,
@@ -674,6 +677,11 @@ def linha(x, series, *, fmt="num", fmt_eixo=None, tema=None, area=None, rotulo_f
     conectar_nulos: liga a linha por cima de datas sem valor (series com calendarios
                diferentes alinhadas numa uniao de datas); por serie: conectar=True
     rotulo_nome: rotulo da ponta leva o nome da serie ("Long Bias +6,7%")
+    tooltip_proximo: tooltip so da linha mais perto do mouse (ela acende, as outras
+               apagam). Padrao: ligado com mais de 4 series - pedido dele em 01/10/2026
+               ("e para aparecer so o que eu estou com o mouse").
+    extras_series: {nome_da_serie: [(rotulo, valor_formatado), ...]} - linhas extras
+               no tooltip_proximo (ex. nome completo, CNPJ)
     """
     t = tema or TEMA_ESCURO
     ss = _normalizar_series(series)
@@ -744,6 +752,19 @@ def linha(x, series, *, fmt="num", fmt_eixo=None, tema=None, area=None, rotulo_f
                                 ordenar=(n > 4) if ordenar_tooltip is None else ordenar_tooltip),
         "series": series_ec,
     })
+    if (n > 4) if tooltip_proximo is None else tooltip_proximo:
+        o = {"fmt": fmt, "fmts": fmts}
+        if cab is not None:
+            o["cab"] = list(cab)
+        if rodape is not None:
+            o["rodape"] = list(rodape)
+        if extras_series:
+            o["extras"] = {str(k): [[str(r), str(v)] for r, v in vs] for k, vs in extras_series.items()}
+        opt["tooltip"]["formatter"] = JS("AWR.tipProximo(%s)" % para_json(o))
+        # sem isto o crosshair acende o ponto de TODAS as series na data e o
+        # foco (as outras apagarem) nao acontece
+        opt["tooltip"]["axisPointer"]["triggerEmphasis"] = False
+        opt["xAxis"]["axisPointer"]["triggerEmphasis"] = False
     if zoom_:
         opt["dataZoom"] = zoom(zoom_, t)
     if mostra_leg:
@@ -1353,6 +1374,46 @@ function tipCascata(o){
     return h;
   };
 }
+// --- tooltip "so a linha do mouse": a serie mais perto do ponteiro (no Y) acende,
+// as outras apagam, e o tooltip mostra so ela. Serve para linha com muitas series.
+var _ativo=null, _mouse=null;
+function proximo(ps){
+  if(!Array.isArray(ps)) ps=[ps];
+  var c=_ativo, melhor=null, dist=Infinity;
+  ps.forEach(function(p){
+    if(p.seriesName&&p.seriesName.charAt(0)==='_'&&p.seriesName!=='_serie') return;
+    var v=valorDe(p); if(vazio(v)) return;
+    var d=0;
+    if(c&&_mouse){ var pt=c.convertToPixel({seriesIndex:p.seriesIndex},[p.dataIndex,+v]); d=pt?Math.abs(pt[1]-_mouse[1]):0; }
+    if(d<dist){ dist=d; melhor=p; }
+  });
+  if(c&&melhor&&c.__awrFoco!==melhor.seriesIndex){
+    var ant=c.__awrFoco, novo=melhor.seriesIndex; c.__awrFoco=novo;
+    // o 'highlight' do ECharts so engrossa a linha; apagar as outras e feito aqui,
+    // direto na opacidade (o blur nativo so dispara com o mouse EM CIMA da linha)
+    setTimeout(function(){ if(c.__awrFoco!==novo) return; focar(c,novo);
+      if(ant!=null) c.dispatchAction({type:'downplay',seriesIndex:ant});
+      c.dispatchAction({type:'highlight',seriesIndex:novo}); },0);
+  }
+  return melhor;
+}
+function focar(c, idx){
+  var n=c.__awrN||0, ss=[];
+  for(var i=0;i<n;i++){ var a=(idx==null||i===idx)?1:0.16; ss.push({lineStyle:{opacity:a},itemStyle:{opacity:a},endLabel:{opacity:a}}); }
+  if(n) c.setOption({series:ss},{lazyUpdate:true,silent:true});
+}
+function tipProximo(o){
+  o=o||{};
+  return function(ps){
+    var p=proximo(ps); if(!p) return '';
+    var i=p.dataIndex, f=fmt((o.fmts&&o.fmts[p.seriesIndex])||o.fmt);
+    var h=cab(o.cab&&o.cab[i]!=null?o.cab[i]:p.axisValueLabel)+linha(corDe(p), visivel(p), f(valorDe(p)));
+    var ex=o.extras&&o.extras[p.seriesName];
+    if(ex) ex.forEach(function(l){ h+=linha('transparent', l[0], esc(l[1])); });
+    if(o.rodape&&o.rodape[i]) h+=nota(o.rodape[i]);
+    return h;
+  };
+}
 function montar(el, opt){
   if(typeof el==='string') el=document.getElementById(el);
   if(!el) return null;
@@ -1361,6 +1422,9 @@ function montar(el, opt){
     if(feito) return; feito=true;
     var c=echarts.getInstanceByDom(el)||echarts.init(el,null,{renderer:'canvas'});
     c.setOption(opt,true);
+    c.__awrN=(opt.series||[]).length;
+    c.getZr().on('mousemove',function(e){ _ativo=c; _mouse=[e.offsetX,e.offsetY]; });
+    c.getZr().on('globalout',function(){ if(c.__awrFoco!=null){ var f=c.__awrFoco; c.__awrFoco=null; focar(c,null); c.dispatchAction({type:'downplay',seriesIndex:f}); } });
     if(window.ResizeObserver) new ResizeObserver(function(){ c.resize(); }).observe(el);
     else window.addEventListener('resize',function(){ c.resize(); });
     el.__awr=c;
@@ -1374,7 +1438,7 @@ function montar(el, opt){
 }
 window.AWR={T:T,fmt:fmt,eixo:eixo,rotulo:rotulo,rotuloCurto:rotuloCurto,rotuloNome:rotuloNome,rotuloRosca:rotuloRosca,esc:esc,compacto:compacto,
   linha:linha,cab:cab,nota:nota,tipEixo:tipEixo,tipItem:tipItem,tipDispersao:tipDispersao,
-  tipCalor:tipCalor,tipCascata:tipCascata,montar:montar};
+  tipCalor:tipCalor,tipCascata:tipCascata,proximo:proximo,tipProximo:tipProximo,montar:montar};
 })();
 """
 

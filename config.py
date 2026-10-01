@@ -90,18 +90,23 @@ COR_CDI      = "#3498DB"       # azul CDI
 COR_OUTROS   = "#5E6A7A"       # cinza slate peers
 COR_POSITIVO = "#22C55E"
 COR_NEGATIVO = "#EF4444"
-# Cores individuais para cada fundo no gráfico de evolução
+# Cores individuais para cada fundo no gráfico de evolução.
+# 01/10/2026: Kapitalo, Navi, Oceana, Encore, Real Investor e Alphakey trocados -
+# estavam quase iguais a outro fundo (pior par era 4,9 de distância OKLab x100;
+# agora o pior par, contando AWR/CDI/Ibov, é 9,2). Antes: Kapitalo #4DD0E1,
+# Navi #A5D6A7, Oceana #90CAF9, Encore #F48FB1, Real Investor #FFB74D,
+# Alphakey #FF8A65.
 CORES_FUNDOS: dict[str, str] = {
     "AWR Capital":                                "#C8A96E",
     "Constellation F FIF Cotas FIA":              "#4FC3F7",
     "Opportunity Log FIF Ações RL":               "#81C784",
-    "Real Investor FIC FIF Ações RL":             "#FFB74D",
-    "Encore Long Bias FIF Cotas FIM":             "#F48FB1",
+    "Real Investor FIC FIF Ações RL":             "#F2C496",
+    "Encore Long Bias FIF Cotas FIM":             "#98A126",
     "SPX Patriot FIF CIC Ações RL":               "#CE93D8",
-    "Kapitalo Tarkus FIF Cotas FIA":              "#4DD0E1",
-    "Alphakey Ações FIF Cotas FIA":               "#FF8A65",
-    "Navi Long Biased FIF CIC Inv. Ações RL":     "#A5D6A7",
-    "Oceana Long Biased FIC FIF Ações RL":        "#90CAF9",
+    "Kapitalo Tarkus FIF Cotas FIA":              "#FCB2E9",
+    "Alphakey Ações FIF Cotas FIA":               "#9588E9",
+    "Navi Long Biased FIF CIC Inv. Ações RL":     "#DC7095",
+    "Oceana Long Biased FIC FIF Ações RL":        "#2AAEA2",
     "Squadra Long Biased FIF Cotas FIA":          "#FFCC02",
     "Itaú Optimus Long Bias Multimercado FIF":    "#EF9A9A",
     "Dynamo Cougar FIF":                          "#80DEEA",
