@@ -25,7 +25,7 @@ sys.path.insert(0, str(_SCRIPT_DIR))
 import math
 
 import dash
-from dash import dcc, html, Input, Output, State, callback_context, dash_table
+from dash import dcc, html, Input, Output, State, callback_context
 import numpy as np
 import pandas as pd
 
@@ -1279,105 +1279,56 @@ def _tab_evolucao(d):
     data_ini_str = ts_ini.strftime("%d/%m/%Y")
     data_fim_str = ts_fim.strftime("%d/%m/%Y")
 
+    # Tabela no padrão AWR (Tabulator, echarts_awr): o dado vai cru (cota e
+    # rentabilidade como número, data como data) e o formato pt-BR é feito na
+    # tela, então ordenar pelo cabeçalho ordena de verdade.
     rows = []
     for col in df_cotas_raw.columns:
         serie = df_cotas_raw[col].dropna()
         if serie.empty:
             continue
-        c_ini = serie.iloc[0]
-        c_fim = serie.iloc[-1]
+        c_ini = float(serie.iloc[0])
+        c_fim = float(serie.iloc[-1])
         ret = (c_fim / c_ini - 1) if c_ini != 0 else np.nan
-        cor = CORES_FUNDOS.get(col, COR_OUTROS)
         # A cota final é a última publicada; se o fundo está defasado em relação
         # ao fim da janela, ela vem repetida (ffill) e isso é sinalizado.
         ts_ult = ult_cota.get(col) or serie.index[-1]
         defasado = ts_ult < ts_fim
+        cnpj = CNPJ_FMT.get(col, "—")
+        # Tooltip do nome: nome completo + CNPJ + data real da última cota do fundo
+        dica = f"{col}\nCNPJ {cnpj}\nÚltima cota publicada: {ts_ult.strftime('%d/%m/%Y')}"
+        if defasado:
+            dica += "  (defasada — valor repetido até o fim da janela)"
         rows.append({
-            "●": "●",
-            "_cor": cor,
-            "_defasado": defasado,
-            "_ult": ts_ult.strftime("%d/%m/%Y"),
-            "Fundo": col,
-            "CNPJ": CNPJ_FMT.get(col, "—"),
-            f"Cota {data_ini_str}": f"{c_ini:,.6f}".replace(",", "X").replace(".", ",").replace("X", "."),
-            f"Cota {data_fim_str}": f"{c_fim:,.6f}".replace(",", "X").replace(".", ",").replace("X", "."),
-            "Rentabilidade": fmt_pct(ret, 2),
+            "fundo": col,
+            "cnpj": cnpj,
+            # mesma cor da linha do fundo no gráfico acima
+            "cor": COR_AWR if col == NOME_AWR else CORES_ENTIDADES.get(col, COR_OUTROS),
+            "dica": dica,
+            "cota_ini": c_ini,
+            "cota_fim": c_fim,
+            "ret": ret * 100 if np.isfinite(ret) else None,
+            "ult": ts_ult,
+            "situacao": "Defasada" if defasado else "Em dia",
+            "classe": "atencao" if defasado else None,   # marca a linha na borda
         })
 
-    col_ids = ["●", "Fundo", "CNPJ", f"Cota {data_ini_str}", f"Cota {data_fim_str}", "Rentabilidade"]
-    columns = [{"name": c, "id": c} for c in col_ids]
-    _oculto = ("_cor", "_defasado", "_ult")
-    data_records = [{k: v for k, v in r.items() if k not in _oculto} for r in rows]
-
-    # Tooltip: nome completo + CNPJ + data real da última cota do fundo
-    tooltip_data = []
-    for r in rows:
-        nota = (
-            f"  \nÚltima cota publicada: **{r['_ult']}**"
-            f"{'  (defasada — valor repetido até o fim da janela)' if r['_defasado'] else ''}"
-        )
-        info = {"value": f"**{r['Fundo']}**  \nCNPJ {r['CNPJ']}{nota}", "type": "markdown"}
-        tooltip_data.append({"Fundo": info, "CNPJ": info, "●": info})
-
-    style_data_cond = [
-        {
-            "if": {"filter_query": f'{{Fundo}} = "{r["Fundo"]}"', "column_id": "●"},
-            "color": r["_cor"],
-            "fontWeight": 900,
-            "fontSize": "16px",
-        }
-        for r in rows
-    ] + [
-        # cota final defasada (repetida por ffill) sai em tom de alerta
-        {
-            "if": {"filter_query": f'{{Fundo}} = "{r["Fundo"]}"',
-                   "column_id": f"Cota {data_fim_str}"},
-            "color": "#E8927C",
-        }
-        for r in rows if r["_defasado"]
-    ] + [
-        {
-            "if": {"filter_query": f'{{Fundo}} = "{NOME_AWR}"'},
-            "backgroundColor": "rgba(200,169,110,0.06)",
-            "fontWeight": 700,
-        }
+    cols = [
+        ea.coluna("fundo", "Fundo", "entidade", cor_campo="cor", sub="cnpj", dica="dica",
+                  cresce=3, min_largura=260),
+        ea.coluna("cota_ini", f"Cota {data_ini_str}", "num:6"),
+        ea.coluna("cota_fim", f"Cota {data_fim_str}", "num:6"),
+        ea.coluna("ret", "Rentabilidade", "varpct:2"),
+        ea.coluna("ult", "Última cota", "data"),
     ]
-
-    tabela = dash_table.DataTable(
-        columns=columns,
-        data=data_records,
-        style_table={"overflowX": "auto", "marginTop": "24px", "borderRadius": "8px", "overflow": "hidden"},
-        style_header={
-            "backgroundColor": "#0A0B0E",
-            "color": COR_AWR,
-            "fontWeight": 700,
-            "fontSize": "10px",
-            "textTransform": "uppercase",
-            "letterSpacing": "0.8px",
-            "border": "1px solid #1E2330",
-        },
-        style_cell={
-            "backgroundColor": "#111318",
-            "color": "#EFF1F5",
-            "fontSize": "12px",
-            "fontFamily": "'JetBrains Mono', 'DM Mono', monospace",
-            "border": "1px solid #1A1F2B",
-            "padding": "7px 12px",
-            "textAlign": "right",
-        },
-        style_cell_conditional=[
-            {"if": {"column_id": "Fundo"}, "textAlign": "left", "minWidth": "220px",
-             "fontFamily": "'Inter', sans-serif"},
-            {"if": {"column_id": "CNPJ"}, "textAlign": "left", "width": "150px",
-             "minWidth": "150px", "color": "#9AA5B4", "letterSpacing": "0.2px"},
-            {"if": {"column_id": "●"}, "textAlign": "center", "width": "30px", "padding": "2px"},
-        ],
-        style_data_conditional=style_data_cond,
-        tooltip_data=tooltip_data,
-        tooltip_delay=250,
-        tooltip_duration=None,
-        page_size=15,
+    # cota final defasada (repetida por ffill): selo em texto, só se houver alguma
+    if any(r["classe"] for r in rows):
+        cols.append(ea.coluna("situacao", "Situação", "selo", selos={"Defasada": "atencao"}))
+    spec = ea.tabela(
+        rows, cols, tema=TEMA_GRAF, max_altura=900, busca="Buscar fundo ou CNPJ",
+        destaque=("fundo", NOME_AWR), linha_classe="classe", vazio="Sem cotas no período",
     )
+    tabela = _card_grafico(ea.dash_tabela(spec, id="tabela-cotas"))
 
     titulo_tabela = html.Div(
         f"Cotas usadas no cálculo  ·  {data_ini_str} → {data_fim_str}",
@@ -1566,207 +1517,73 @@ def update_dist(metric_col, cache_key, active_tab):
 # TAB 4: TABELA COMPLETA
 # ─────────────────────────────────────────────────────────────────────────────
 _COL_LABELS = {
-    "#": "#", "★": "★", "Fundo": "Fundo", "CNPJ": "CNPJ", "N_obs": "N obs",
+    "#": "#", "Fundo": "Fundo", "N_obs": "N obs",
     "Ret_acum": "Ret. Acum.", "Ret_ann": "Ret. Ann.",
     "Vol_ann": "Vol. Ann.", "Sharpe": "Sharpe", "Sortino": "Sortino",
     "DD_max": "DD Máx.", "Pct_meses_pos": "% Meses +",
-    "Pct_do_CDI": "% do CDI", "Pct_meses_vs_CDI": "% M > CDI",
+    "Pct_do_CDI": "% do CDI", "vs_CDI": "vs CDI", "Pct_meses_vs_CDI": "% M > CDI",
     "Pct_meses_vs_Ibov": "% M > Ibov", "TE_Ibov": "TE Ibov",
     "IR_Ibov": "IR Ibov", "PL": "Patrimônio",
 }
 
-_FMT_MAP = {
-    "Ret_acum": lambda v: fmt_pct(v, 2),
-    "Ret_ann": lambda v: fmt_pct(v),
-    "Vol_ann": lambda v: fmt_pct(v),
-    "Sharpe": lambda v: fmt_num(v),
-    "Sortino": lambda v: fmt_num(v),
-    "DD_max": lambda v: fmt_pct(v),
-    "Pct_meses_pos": lambda v: fmt_pct(v, 0),
-    "Pct_do_CDI": lambda v: fmt_pct(v, 0),
-    "Pct_meses_vs_CDI": lambda v: fmt_pct(v, 0),
-    "Pct_meses_vs_Ibov": lambda v: fmt_pct(v, 0),
-    "TE_Ibov": lambda v: fmt_pct(v),
-    "IR_Ibov": lambda v: fmt_num(v),
-    "PL": lambda v: fmt_pl(v),
-}
+# Métricas que vêm como fração (0,123) e a tabela mostra em % (12,3%)
+_COLS_FRACAO = ["Ret_acum", "Ret_ann", "Vol_ann", "DD_max", "Pct_meses_pos", "Pct_do_CDI",
+                "Pct_meses_vs_CDI", "Pct_meses_vs_Ibov", "TE_Ibov"]
 
 
-# Colunas que recebem cor por sinal (verde/vermelho) na tabela
-_SIGN_COLS = ["Ret_acum", "Ret_ann", "Sharpe", "Sortino", "IR_Ibov", "Pct_do_CDI"]
+def _tabela_spec(m: pd.DataFrame) -> dict:
+    """Tabela Completa no padrão AWR (Tabulator, echarts_awr).
 
+    O dado vai cru (número é número) e o formato pt-BR é feito na tela, então o
+    clique no cabeçalho ordena de verdade. Regras de cor de antes, traduzidas:
+    sinal verde/vermelho em retornos/Sharpe/Sortino/IR e no drawdown; '% do CDI'
+    >= 100% vira o selo 'Bate o CDI'; a linha do AWR fica destacada."""
+    df = m.copy()
+    if "Ret_acum" in df.columns:
+        df = df.sort_values("Ret_acum", ascending=False, na_position="last").reset_index(drop=True)
+    df.insert(0, "rank", range(1, len(df) + 1))          # ranking por Ret. Acum.
+    df["CNPJ"] = df["Fundo"].map(CNPJ_FMT).fillna("—")
+    if "Pct_do_CDI" in df.columns:
+        df["vs_CDI"] = pd.to_numeric(df["Pct_do_CDI"], errors="coerce").map(
+            lambda v: None if not np.isfinite(v) else ("Bate o CDI" if v >= 1 else "Abaixo do CDI"))
+    for c in _COLS_FRACAO:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce") * 100
 
-def _insert_cols_fixas(display: pd.DataFrame) -> pd.DataFrame:
-    """Insere as colunas #, ★ e CNPJ.
-
-    Usada tanto pelos records quanto pelo header, pra que a ordem das colunas
-    nunca saia de sincronia entre os dois.
-    """
-    display.insert(0, "#", range(1, len(display) + 1))
-    display.insert(1, "★", display["Fundo"].apply(lambda x: "★" if x == NOME_AWR else ""))
-    pos = display.columns.get_loc("Fundo") + 1
-    display.insert(pos, "CNPJ", display["Fundo"].map(CNPJ_FMT).fillna("—"))
-    return display
-
-
-def _build_tabela_records(m: pd.DataFrame) -> list[dict]:
-    """Ordena por retorno, adiciona ranking, helpers numéricos e formata colunas."""
-    display = m.copy()
-    if "Ret_acum" in display.columns:
-        display = display.sort_values("Ret_acum", ascending=False, na_position="last").reset_index(drop=True)
-    display = _insert_cols_fixas(display)
-    # Helpers numéricos (antes de formatar) p/ colorir células por sinal via filter_query.
-    # Não entram em `columns`, então ficam ocultos — só alimentam o style_data_conditional.
-    for c in _SIGN_COLS:
-        if c in display.columns:
-            display[f"_num_{c}"] = pd.to_numeric(display[c], errors="coerce").fillna(0.0)
-    for col, fn in _FMT_MAP.items():
-        if col in display.columns:
-            display[col] = display[col].apply(fn)
-    return display.to_dict("records")
-
-
-def _tabela_columns(m: pd.DataFrame) -> list[dict]:
-    display = _insert_cols_fixas(m.copy())
-    return [{"name": _COL_LABELS.get(c, c), "id": c} for c in display.columns]
-
-
-def _tabela_style_data_cond():
-    conds = [
-        # zebra striping discreto
-        {"if": {"row_index": "odd"}, "backgroundColor": "#0F1217"},
+    L = _COL_LABELS
+    cols = [
+        ea.coluna("rank", L["#"], "num", largura=54, min_largura=48, fixa=True),
+        ea.coluna("Fundo", L["Fundo"], sub="CNPJ", min_largura=250, fixa=True),
+        ea.coluna("N_obs", L["N_obs"], "num"),
+        ea.coluna("Ret_acum", L["Ret_acum"], "varpct:2"),
+        ea.coluna("Ret_ann", L["Ret_ann"], "varpct"),
+        ea.coluna("Vol_ann", L["Vol_ann"], "pct"),
+        ea.coluna("Sharpe", L["Sharpe"], "num:2", sinal=True),
+        ea.coluna("Sortino", L["Sortino"], "num:2", sinal=True),
+        ea.coluna("DD_max", L["DD_max"], "pct", sinal=True),
+        ea.coluna("Pct_meses_pos", L["Pct_meses_pos"], "pct:0"),
+        ea.coluna("Pct_do_CDI", L["Pct_do_CDI"], "pct:0"),
+        ea.coluna("vs_CDI", L["vs_CDI"], "selo", selos={"Bate o CDI": "bom"}),
+        ea.coluna("Pct_meses_vs_CDI", L["Pct_meses_vs_CDI"], "pct:0"),
+        ea.coluna("Pct_meses_vs_Ibov", L["Pct_meses_vs_Ibov"], "pct:0"),
+        ea.coluna("TE_Ibov", L["TE_Ibov"], "pct"),
+        ea.coluna("IR_Ibov", L["IR_Ibov"], "num:2", sinal=True),
+        ea.coluna("PL", L["PL"], "brlc"),
     ]
-    # verde/vermelho por sinal nos retornos e índices
-    for c in ["Ret_acum", "Ret_ann", "Sharpe", "Sortino", "IR_Ibov"]:
-        conds += [
-            {"if": {"filter_query": f"{{_num_{c}}} > 0", "column_id": c}, "color": COR_POSITIVO},
-            {"if": {"filter_query": f"{{_num_{c}}} < 0", "column_id": c}, "color": COR_NEGATIVO},
-        ]
-    # drawdown sempre em tom de alerta (é sempre negativo)
-    conds.append({"if": {"column_id": "DD_max"}, "color": "#E8927C"})
-    # % do CDI: verde se bate o CDI (≥100%), cinza caso contrário
-    conds += [
-        {"if": {"filter_query": "{_num_Pct_do_CDI} >= 1", "column_id": "Pct_do_CDI"}, "color": COR_POSITIVO},
-        {"if": {"filter_query": "{_num_Pct_do_CDI} < 1", "column_id": "Pct_do_CDI"}, "color": "#9AA5B4"},
-    ]
-    # linha do AWR destacada (por último p/ o fundo vencer o zebra)
-    conds += [
-        {"if": {"filter_query": '{★} = "★"'},
-         "backgroundColor": "rgba(200,169,110,0.10)", "fontWeight": 700},
-        {"if": {"filter_query": '{★} = "★"', "column_id": "Fundo"}, "color": COR_AWR},
-        {"if": {"filter_query": '{★} = "★"', "column_id": "★"}, "color": COR_AWR},
-    ]
-    return conds
+    cols = [c for c in cols if c["campo"] in df.columns]
+    return ea.tabela(
+        df, cols, tema=TEMA_GRAF, max_altura=1000, busca="Buscar fundo ou CNPJ",
+        ordem=("Ret_acum", "desc") if "Ret_acum" in df.columns else None,
+        destaque=("Fundo", NOME_AWR), vazio="Nenhum fundo no período",
+    )
 
 
 def _tab_tabela(d):
     m = d["metricas"]
     if m.empty:
         return html.Div("Sem dados.", style={"color": "#666"})
-
-    records = _build_tabela_records(m)
-    columns = _tabela_columns(m)
-
-    return html.Div([
-        # ── Barra de busca ──
-        html.Div(
-            style={
-                "display": "flex", "alignItems": "center", "gap": "10px",
-                "marginBottom": "14px",
-            },
-            children=[
-                html.Span("🔍", style={"color": "#5E6A7A", "fontSize": "13px"}),
-                dcc.Input(
-                    id="search-tabela",
-                    type="text",
-                    placeholder="Buscar fundo pelo nome…",
-                    debounce=True,
-                    style={
-                        "backgroundColor": "#111318",
-                        "border": "1px solid #1E2330",
-                        "borderRadius": "5px",
-                        "color": "#EFF1F5",
-                        "padding": "7px 14px",
-                        "fontSize": "12px",
-                        "fontFamily": "'Inter', sans-serif",
-                        "width": "300px",
-                        "outline": "none",
-                        "letterSpacing": "0.2px",
-                    },
-                ),
-                html.Span(
-                    "Pressione Enter para filtrar · clique nos cabeçalhos para ordenar",
-                    style={
-                        "color": "#2A3040", "fontSize": "10px",
-                        "letterSpacing": "0.5px",
-                    },
-                ),
-            ],
-        ),
-        # ── DataTable ──
-        dash_table.DataTable(
-            id="tabela-fundos",
-            columns=columns,
-            data=records,
-            sort_action="native",
-            page_size=20,
-            style_as_list_view=True,
-            style_table={
-                "overflowX": "auto",
-                "borderRadius": "10px",
-            },
-            style_header={
-                "backgroundColor": "#0A0B0E",
-                "color": "#8A94A6",
-                "fontWeight": 700,
-                "fontSize": "10px",
-                "textTransform": "uppercase",
-                "letterSpacing": "0.6px",
-                "fontFamily": "'Inter', sans-serif",
-                "border": "none",
-                "borderBottom": f"2px solid {COR_AWR}",
-                "padding": "12px 13px",
-            },
-            style_cell={
-                "backgroundColor": "#0C0E12",
-                "color": "#EFF1F5",
-                "fontSize": "12.5px",
-                "fontFamily": "'JetBrains Mono', 'DM Mono', monospace",
-                "border": "none",
-                "borderBottom": "1px solid #15191F",
-                "padding": "11px 13px",
-                "textAlign": "right",
-                "whiteSpace": "normal",
-                "height": "auto",
-            },
-            style_cell_conditional=[
-                {"if": {"column_id": "Fundo"}, "textAlign": "left", "minWidth": "230px",
-                 "fontFamily": "'Inter', sans-serif", "fontSize": "13px"},
-                {"if": {"column_id": "CNPJ"}, "textAlign": "left", "width": "155px",
-                 "minWidth": "155px", "color": "#9AA5B4", "fontSize": "11.5px",
-                 "whiteSpace": "nowrap"},
-                {"if": {"column_id": "★"}, "textAlign": "center", "width": "32px", "padding": "2px 4px"},
-                {"if": {"column_id": "#"}, "textAlign": "center", "width": "42px",
-                 "color": "#5E6A7A", "fontWeight": 600, "padding": "2px 6px"},
-            ],
-            style_data_conditional=_tabela_style_data_cond(),
-        ),
-    ])
-
-
-@app.callback(
-    Output("tabela-fundos", "data"),
-    Input("search-tabela", "value"),
-    State("store-data", "data"),
-    prevent_initial_call=True,
-)
-def filtrar_tabela(search, cache_key):
-    if not cache_key or cache_key not in _CACHE:
-        return []
-    m = _CACHE[cache_key]["metricas"]
-    if search:
-        m = m[m["Fundo"].str.contains(search, case=False, na=False)]
-    return _build_tabela_records(m)
+    # busca (sem acento, "N de M") e ordenação ficam dentro da própria tabela
+    return _card_grafico(ea.dash_tabela(_tabela_spec(m), id="tabela-fundos"))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

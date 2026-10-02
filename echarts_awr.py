@@ -15,6 +15,8 @@ dict `option` do ECharts montado em Python; este modulo entrega:
   * render ....... st_grafico (Streamlit), dash_grafico / pagina_html (Dash:
                    html.Iframe(srcDoc=...)), trecho_html + cabecalho_html (pagina
                    HTML/Jinja que ja tem <head>), salvar_html (arquivo).
+  * tabelas ...... coluna, tabela -> st_tabela (Streamlit), dash_tabela / pagina_tabela
+                   (Dash) - Tabulator com busca, ordenacao numerica, total, selos.
   * matplotlib ... mpl_estilo, mpl_cor, mpl_eixo_fmt, mpl_rotulo_final,
                    mpl_rotular_barras, mpl_legenda - o mesmo visual em PDF/PNG/e-mail.
 
@@ -48,7 +50,12 @@ import json
 import math
 from copy import deepcopy
 
-__version__ = "1.3.0"
+__version__ = "1.5.0"
+# 1.5: tabelas: altura real quando cabe (sem faixa vazia acima do total), largura
+#      minima pelo conteudo, media sem arredondar, total alinhado na barra,
+#      sinal='inverso', fmt_campo (formato por linha), 'datahora', chave= (lembra
+#      ordenacao e busca entre redesenhos)
+# 1.4: tabelas (Tabulator): coluna(), tabela(), st_tabela, dash_tabela, pagina_tabela
 # 1.3: linha com muitas series -> tooltip so da linha mais perto do mouse
 #      (AWR.proximo / AWR.tipProximo; tooltip_proximo=, extras_series=)
 # 1.1: estilo matplotlib (mpl_*) para PDF/PNG/e-mail
@@ -1537,6 +1544,477 @@ def dash_iframe_vazio(id, altura=360, style=None):
               "background": "transparent"}
     estilo.update(style or {})
     return html.Iframe(id=id, srcDoc="", style=estilo)
+
+
+# =============================================================================
+# TABELAS (Tabulator 6.3.1, MIT) - padrao aprovado em 01/10/2026
+#
+#   cols = [ea.coluna("nome", "Sacado", sub="cnpj", cresce=3),
+#           ea.coluna("pct_pl", "% do PL", "barra", fmt="pct", limite=20, total="soma"),
+#           ea.coluna("valor", "Valor", "brl", total="soma"),
+#           ea.coluna("qtd", "Titulos", "num", total="soma"),
+#           ea.coluna("status", "Situacao", "selo", selos={"Acima do limite": "ruim"})]
+#   spec = ea.tabela(df, cols, ordem=("pct_pl", "desc"), busca="Buscar sacado ou CNPJ")
+#   ea.st_tabela(spec)                         # Streamlit
+#   ea.dash_tabela(spec, id=...)               # Dash (callback: ea.pagina_tabela(spec) -> srcDoc)
+#
+# Regras: o DADO vai cru (numero e numero, data e data) e a formatacao pt-BR e
+# feita na tela - assim a ordenacao e numerica de verdade (string "R$ 9.000"
+# nao ordena). Numero a direita com digitos tabulares; cabecalho fixo; busca sem
+# acento; linha de total; status sempre com texto (selo), nunca so cor.
+# =============================================================================
+TABULATOR_JS = "https://cdnjs.cloudflare.com/ajax/libs/tabulator/6.3.1/js/tabulator.min.js"
+TABULATOR_CSS = "https://cdnjs.cloudflare.com/ajax/libs/tabulator/6.3.1/css/tabulator.min.css"
+
+_TIPOS_NUM = ("brl", "brlc", "pct", "pctf", "varpct", "pp", "num", "numc", "mult", "barra")
+
+
+def coluna(campo, titulo=None, tipo="texto", *, largura=None, min_largura=None, cresce=None,
+           total=None, sub=None, limite=None, escala=None, selos=None, cor_campo=None, fmt=None,
+           sinal=None, ordenavel=True, fixa=False, dica=None, quebra=False, fmt_campo=None):
+    """Uma coluna da tabela.
+    tipo ...... 'texto' | 'data' | 'datahora' | 'selo' | 'entidade' | 'barra' | formato
+                numerico ('brl', 'brl:2', 'brlc', 'pct', 'pct:2', 'pctf', 'varpct', 'pp',
+                'num', 'num:2', 'numc', 'mult')
+    fmt_campo . campo com o formato de CADA linha (ex. tabela com R$, % e x
+                misturados): o valor continua numero e ordena certo
+    sinal ..... 'inverso' = menor e melhor (positivo vermelho, negativo verde)
+    min_largura padrao: calculada pelo conteudo (cabecalho, maior valor e total)
+    sub ....... (texto/entidade) campo mostrado embaixo, em cinza (ex. CNPJ)
+    total ..... 'soma' | 'media' | 'contagem' | texto fixo (ex. 'Total')
+    barra ..... fmt= formato do numero ao lado (padrao 'pct'), limite= marca
+                tracejada (acima dela a barra fica vermelha), escala= maximo da barra
+    selo ...... selos={valor: 'ruim'|'atencao'|'bom'|'ok'}; o texto e o proprio valor
+    entidade .. traco de cor (campo cor_campo) + nome - ex. fundo com a cor do grafico
+    sinal ..... True: numero com + e verde/vermelho (padrao True para varpct/pp)
+    fixa ...... congela a coluna na rolagem horizontal
+    dica ...... campo com texto de tooltip ao parar o mouse na celula
+    quebra .... texto longo quebra linha em vez de cortar com '...'"""
+    k = str(tipo).partition(":")[0]
+    c = {"campo": str(campo), "titulo": titulo if titulo is not None else str(campo), "tipo": tipo}
+    for chave, val in (("largura", largura), ("min", min_largura), ("cresce", cresce),
+                       ("total", total), ("sub", sub), ("limite", limite), ("escala", escala),
+                       ("selos", selos), ("cor_campo", cor_campo), ("fmt", fmt), ("dica", dica),
+                       ("fmt_campo", fmt_campo)):
+        if val is not None:
+            c[chave] = val
+    c["sinal"] = ((k in ("varpct", "pp")) if sinal is None
+                  else ("inverso" if sinal == "inverso" else bool(sinal)))
+    c["ordenavel"] = bool(ordenavel)
+    c["num"] = k in _TIPOS_NUM
+    if fixa:
+        c["fixa"] = True
+    if quebra:
+        c["quebra"] = True
+    return c
+
+
+def _registros(dados):
+    """DataFrame / lista de dicts -> lista de dicts com valores JSON-limpos."""
+    if hasattr(dados, "to_dict"):
+        df = dados.reset_index(drop=True) if hasattr(dados, "reset_index") else dados
+        return df.to_dict("records")
+    return [dict(r) for r in (dados or [])]
+
+
+def _data_iso(v):
+    """Data -> 'AAAA-MM-DD' (ordena como texto; a tela mostra dd/mm/aaaa)."""
+    if v is None or type(v).__name__ in ("NaTType", "NAType"):
+        return None
+    if isinstance(v, float) and math.isnan(v):
+        return None
+    if isinstance(v, str):
+        return v[:10] or None
+    if hasattr(v, "date") and callable(v.date):
+        v = v.date()
+    return v.isoformat()[:10] if hasattr(v, "isoformat") else str(v)
+
+
+def _datahora_iso(v):
+    """Data e hora -> 'AAAA-MM-DD HH:MM' (ordena como texto; tela: dd/mm/aaaa HH:MM)."""
+    if v is None or type(v).__name__ in ("NaTType", "NAType"):
+        return None
+    if isinstance(v, float) and math.isnan(v):
+        return None
+    if isinstance(v, str):
+        s = v.strip()
+        for f in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y"):
+            try:
+                return _dt.datetime.strptime(s, f).strftime("%Y-%m-%d %H:%M")
+            except ValueError:
+                pass
+        return s.replace("T", " ")[:16] or None
+    if isinstance(v, _dt.datetime) or hasattr(v, "to_pydatetime"):
+        return v.strftime("%Y-%m-%d %H:%M")
+    if isinstance(v, _dt.date):
+        return v.isoformat() + " 00:00"
+    return str(v)
+
+
+def _largura_min(c, linhas):
+    """Largura minima (px) para cabecalho, valores e total caberem sem corte."""
+    k = str(c["tipo"]).partition(":")[0]
+    cab = len(str(c["titulo"])) * 7.6 + 34          # maiusculas 10,5px + seta
+    vals = [l.get(c["campo"]) for l in linhas[:3000]]
+    vals = [v for v in vals if v is not None and not (isinstance(v, float) and math.isnan(v))]
+    px = 0
+    if k == "barra":
+        px = (c.get("rotulo_ch", 6)) * 7.4 + 10 + 70 + 20
+    elif c.get("num"):
+        textos = [formatar(v, c["tipo"]) if not isinstance(v, str) else v for v in vals]
+        if c.get("total") in ("soma", "media") and vals:
+            nums = [float(v) for v in vals if not isinstance(v, str)]
+            if nums:
+                tot = sum(nums) if c["total"] == "soma" else sum(nums) / len(nums)
+                textos.append(formatar(tot, c["tipo"]))
+        px = max((len(s) for s in textos), default=4) * 7.4 + (8 if c.get("sinal") else 0) + 24
+    elif k == "data":
+        px = 10 * 7.4 + 24
+    elif k == "datahora":
+        px = 16 * 7.4 + 24
+    elif k == "selo":
+        px = max((len(str(v)) for v in vals), default=4) * 6.8 + 46
+    else:
+        larg = max((len(str(v)) for v in vals), default=6)
+        if c.get("sub"):
+            larg = max(larg, max((len(str(l.get(c["sub"]) or "")) for l in linhas[:3000]), default=0) * 0.9)
+        px = min(larg, 26) * 7.2 + 24 + (18 if k == "entidade" else 0)
+        if isinstance(c.get("total"), str) and c["total"] not in ("soma", "media", "contagem"):
+            px = max(px, len(c["total"]) * 7.6 + 24)
+    return int(max(cab, px, 64))
+
+
+def tabela(dados, colunas, *, tema=None, altura=None, max_altura=520, busca=True,
+           busca_campos=None, ordem=None, destaque=None, vazio="Nenhum registro",
+           layout=None, linha_classe=None, chave=None):
+    """Monta a especificacao da tabela (dict) para st_tabela / dash_tabela / pagina_tabela.
+    busca ......... True, False ou o placeholder (ex. 'Buscar sacado ou CNPJ')
+    busca_campos .. campos em que a busca procura (padrao: texto + sub)
+    ordem ......... (campo, 'asc'|'desc') ordenacao inicial
+    destaque ...... (campo, valor): linha destacada em dourado (ex. o fundo AWR)
+    linha_classe .. campo com 'ruim'/'atencao'/'bom' para marcar a linha na borda
+    altura ........ px do iframe; None = cabe todas as linhas ate max_altura
+    layout ........ 'ajustar' (colunas cabem na largura) | 'rolar' (rolagem
+                    horizontal); padrao: 'ajustar' ate 8 colunas
+    chave ......... nome unico: guarda a ordenacao e a busca do usuario na sessao do
+                    navegador e restaura quando a tabela e redesenhada (ex. tabela que
+                    se atualiza sozinha a cada 30 s)"""
+    t = tema or TEMA_ESCURO
+    regs = _registros(dados)
+    cols = [dict(c) for c in colunas]
+    campos_data = [c["campo"] for c in cols if c["tipo"] == "data"]
+    campos_dh = [c["campo"] for c in cols if c["tipo"] == "datahora"]
+    if busca_campos is None:
+        busca_campos = [c["campo"] for c in cols if c["tipo"] in ("texto", "entidade", "selo")] + \
+                       [c["sub"] for c in cols if c.get("sub")]
+    # so os campos que a tabela usa vao para a pagina (menos peso no iframe)
+    usados = {c["campo"] for c in cols} | {c.get("sub") for c in cols} | {c.get("cor_campo") for c in cols} \
+        | {c.get("dica") for c in cols} | ({destaque[0]} if destaque else set()) | {linha_classe} \
+        | {c.get("fmt_campo") for c in cols} | set(busca_campos)
+    usados.discard(None)
+    linhas = []
+    for r in regs:
+        lin = {k: v for k, v in r.items() if k in usados}
+        for k in campos_data:
+            lin[k] = _data_iso(r.get(k))
+        for k in campos_dh:
+            lin[k] = _datahora_iso(r.get(k))
+        linhas.append(lin)
+    for c in cols:                                   # escala e largura do rotulo da barra
+        if c["tipo"] == "barra":
+            vals = [float(l[c["campo"]]) for l in linhas
+                    if not _vazio(l.get(c["campo"])) and not isinstance(l.get(c["campo"]), str)]
+            if "escala" not in c:
+                m = max(vals) if vals else 1
+                c["escala"] = max(m * 1.08, float(c.get("limite") or 0) * 1.25, 1e-9)
+            c["rotulo_ch"] = max([len(formatar(v, c.get("fmt", "pct"))) for v in vals] + [4])
+    for c in cols:                                   # nada cortado no ajuste a largura
+        if "min" not in c and "largura" not in c:
+            c["min"] = _largura_min(c, linhas)
+    tem_sub = any(c.get("sub") for c in cols)
+    tem_total = any(c.get("total") for c in cols)
+    n = len(linhas)
+    alt_linha = 46 if tem_sub else 38
+    barra_busca = 46 if busca else 0
+    conteudo = 40 + max(n, 1) * alt_linha + (40 if tem_total else 0) + 4
+    auto = altura is None and barra_busca + conteudo <= int(max_altura)
+    if altura is None:
+        altura = min(int(max_altura), barra_busca + conteudo)
+    # cabe tudo: a tabela cresce do tamanho real (sem faixa vazia acima do total);
+    # nao cabe: altura fixa com rolagem e cabecalho parado
+    alt_tab = None if auto else int(altura) - barra_busca
+    spec = {
+        "colunas": cols, "dados": linhas, "altura": int(altura), "altura_tabela": alt_tab,
+        "busca": bool(busca), "placeholder": busca if isinstance(busca, str) else "Buscar",
+        "busca_campos": busca_campos, "vazio": vazio,
+        "ordem": list(ordem) if ordem else None,
+        "destaque": list(destaque) if destaque else None,
+        "linha_classe": linha_classe,
+        "chave": str(chave) if chave else None,
+        "virtual": n > 150 and alt_tab is not None,
+        "layout": "fitColumns" if (layout or ("ajustar" if len(cols) <= 8 else "rolar")) == "ajustar"
+                  else "fitDataStretch",
+        "_tema": t,
+    }
+    return spec
+
+
+def _css_tabela(t):
+    from string import Template
+    sup = t["superficie"]
+    return Template(r"""
+html,body{margin:0;padding:0;background:$fundo;overflow:hidden;font-family:$fonte;color:$texto1}
+.awr-tbar{display:flex;align-items:center;justify-content:flex-end;gap:10px;height:38px;margin:2px 6px 6px 2px}
+.awr-busca{background:$campo;border:1px solid $borda;border-radius:8px;color:$texto1;font:500 12.5px $fonte;
+ padding:7px 10px 7px 30px;width:240px;max-width:60%;outline:none;
+ background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2398A7C2' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E");
+ background-repeat:no-repeat;background-position:10px center}
+.awr-busca:focus{border-color:$destaque_escuro}
+.awr-busca::placeholder{color:$texto3}
+.awr-cont{font-size:11.5px;color:$texto3;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tabulator{background:transparent;border:none;font-family:$fonte;font-size:12.5px;color:$texto1}
+.tabulator .tabulator-header{background:$sup;border-bottom:1px solid $borda_forte;color:$texto3}
+.tabulator .tabulator-header .tabulator-col{background:$sup;border-right:none}
+.tabulator .tabulator-header .tabulator-col .tabulator-col-content{padding:8px 10px}
+.tabulator .tabulator-header .tabulator-col .tabulator-col-content .tabulator-col-title-holder{display:flex;align-items:center;gap:6px}
+.tabulator .tabulator-header .tabulator-col.num .tabulator-col-title-holder{justify-content:flex-end}
+.tabulator .tabulator-col-title{font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;overflow:visible;text-overflow:clip;white-space:nowrap;padding-right:0!important}
+.tabulator .tabulator-header .tabulator-col .tabulator-col-content .tabulator-col-sorter{position:static;margin:0}
+.tabulator .tabulator-header .tabulator-col.tabulator-sortable:hover{background:$hover_cab;color:$texto1}
+.tabulator .tabulator-header .tabulator-col[aria-sort="ascending"],.tabulator .tabulator-header .tabulator-col[aria-sort="descending"]{color:$destaque_claro}
+.tabulator .tabulator-col .tabulator-col-sorter .tabulator-arrow{border-bottom-color:$texto3}
+.tabulator .tabulator-col:not([aria-sort="ascending"]):not([aria-sort="descending"]) .tabulator-arrow{opacity:0;transition:opacity .15s}
+.tabulator .tabulator-col.tabulator-sortable:hover .tabulator-arrow{opacity:.7}
+.tabulator .tabulator-col[aria-sort="ascending"] .tabulator-col-sorter .tabulator-arrow{border-bottom-color:$destaque}
+.tabulator .tabulator-col[aria-sort="descending"] .tabulator-col-sorter .tabulator-arrow{border-top-color:$destaque;border-bottom-color:transparent}
+.tabulator .tabulator-col-resize-handle{opacity:0}
+.tabulator .tabulator-tableholder{background:transparent}
+.tabulator .tabulator-tableholder .tabulator-table{background:transparent;color:$texto1}
+.tabulator-row{background:transparent;border-bottom:1px solid $linha;min-height:36px}
+.tabulator-row.tabulator-row-even{background:transparent}
+.tabulator-row:hover{background:$hover!important;cursor:default}
+.tabulator-row .tabulator-cell{border-right:none;padding:8px 10px;display:inline-flex;align-items:center;user-select:text}
+.tabulator-row .tabulator-cell.tabulator-frozen{background:$sup}
+.tabulator-row:hover .tabulator-cell.tabulator-frozen{background:$sup_hover}
+.tabulator-cell.num{font-variant-numeric:tabular-nums;justify-content:flex-end;text-align:right;white-space:nowrap}
+.tabulator-cell .corta{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;display:block}
+.tabulator-cell.quebra{white-space:normal;line-height:1.3}
+.tabulator .tabulator-footer{background:$sup;border-top:1px solid $borda_forte;color:$texto1}
+.tabulator .tabulator-footer .tabulator-calcs-holder{background:$sup;border:none}
+.tabulator .tabulator-footer .tabulator-calcs-holder .tabulator-row{background:$sup!important;border:none;font-weight:700}
+.tabulator .tabulator-placeholder span,.tabulator .tabulator-tableholder .tabulator-placeholder .tabulator-placeholder-contents{color:$texto3!important;font-weight:500!important;font-size:13px!important;padding:18px 10px}
+.tabulator .tabulator-tableholder::-webkit-scrollbar{width:8px;height:8px}
+.tabulator .tabulator-tableholder::-webkit-scrollbar-thumb{background:$borda;border-radius:4px}
+.tabulator .tabulator-tableholder::-webkit-scrollbar-track{background:transparent}
+.awr-nm{display:flex;flex-direction:column;min-width:0;line-height:1.25}
+.awr-nm b{font-weight:600;color:$texto1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.awr-nm i{font-style:normal;font-size:11px;color:$texto3;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.awr-pl{display:flex;align-items:center;gap:10px;width:100%}
+.awr-trilho{position:relative;flex:1;height:6px;border-radius:3px;background:$trilho;min-width:50px}
+.awr-enche{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:$destaque}
+.awr-enche.ruim{background:$perigo}
+.awr-marco{position:absolute;top:-4px;bottom:-4px;width:0;border-left:1.5px dashed $perigo_marco}
+.awr-pl span{font-variant-numeric:tabular-nums;min-width:46px;text-align:right;font-weight:600}
+.awr-selo{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;white-space:nowrap;color:$texto2;background:$selo_ok}
+.awr-selo:before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+.awr-selo.ruim{color:$perigo_txt;background:$perigo_fundo}
+.awr-selo.atencao{color:$alerta_txt;background:$alerta_fundo}
+.awr-selo.bom{color:$sucesso_txt;background:$sucesso_fundo}
+.awr-pos{color:$sucesso_txt}.awr-neg{color:$perigo_txt}.awr-nulo{color:$texto3}
+.awr-ent{display:flex;align-items:center;gap:8px;min-width:0}
+.awr-ent .k{width:10px;height:3px;border-radius:2px;flex:none}
+.awr-ent .awr-nm b{font-weight:500}
+.tabulator-row .tabulator-cell.tabulator-frozen.tabulator-frozen-left{border-right:1px solid $borda}
+.tabulator-row.awr-destaque{background:$destaque_fundo!important}
+.tabulator-row.awr-destaque .tabulator-cell.tabulator-frozen{background:$sup_hover}
+.tabulator-row.awr-destaque > .tabulator-cell:first-child{box-shadow:inset 3px 0 0 $destaque}
+.tabulator-row.awr-destaque .awr-nm b,.tabulator-row.awr-destaque .awr-ent b{font-weight:700;color:$destaque_claro}
+.tabulator-row.awr-linha-ruim > .tabulator-cell:first-child{box-shadow:inset 3px 0 0 $perigo}
+.tabulator-row.awr-linha-atencao > .tabulator-cell:first-child{box-shadow:inset 3px 0 0 $alerta}
+.tabulator-row.awr-linha-bom > .tabulator-cell:first-child{box-shadow:inset 3px 0 0 $sucesso}
+""").safe_substitute(
+        fundo=t["fundo"], fonte=t["fonte"], texto1=t["texto1"], texto2=t["texto2"], texto3=t["texto3"],
+        sup=sup, sup_hover=_misturar(sup, t["destaque"], 0.06),
+        campo=_misturar(sup, "#000000", 0.25) if t["nome"] == "escuro" else "#FFFFFF",
+        borda=_hex_mpl(t["tooltip_borda"]) if t["nome"] == "escuro" else "#D8DEE8",
+        borda_forte=t["etiqueta_fundo"] if t["nome"] == "escuro" else "#CBD5E1",
+        linha=_rgba(t["texto3"], 0.14) if t["texto3"].startswith("#") else t["grade"],
+        hover=_rgba(t["destaque"], 0.06), hover_cab=_misturar(sup, "#FFFFFF", 0.04),
+        trilho=_rgba(t["texto3"], 0.16) if t["texto3"].startswith("#") else t["grade"],
+        destaque=t["destaque"], destaque_claro=t["destaque_claro"], destaque_escuro=t["destaque_escuro"],
+        destaque_fundo=_rgba(t["destaque"], 0.08),
+        perigo=t["perigo"], perigo_marco=_rgba(t["perigo"], 0.7),
+        perigo_txt=_misturar(t["perigo"], "#FFFFFF", 0.35) if t["nome"] == "escuro" else t["perigo"],
+        perigo_fundo=_rgba(t["perigo"], 0.13),
+        alerta=t["alerta"],
+        alerta_txt=_misturar(t["alerta"], "#FFFFFF", 0.3) if t["nome"] == "escuro" else "#9A6700",
+        alerta_fundo=_rgba(t["alerta"], 0.13),
+        sucesso=t["sucesso"],
+        sucesso_txt=_misturar(t["sucesso"], "#FFFFFF", 0.25) if t["nome"] == "escuro" else t["sucesso"],
+        sucesso_fundo=_rgba(t["sucesso"], 0.13),
+        selo_ok=_rgba(t["texto3"], 0.12) if t["texto3"].startswith("#") else t["grade"],
+    )
+
+
+def _misturar(a, b, f):
+    """Cor a misturada com b na fracao f (0..1)."""
+    ra, rb = _hex_rgb(a), _hex_rgb(b)
+    return "#%02X%02X%02X" % tuple(round(x + (y - x) * f) for x, y in zip(ra, rb))
+
+
+_RUNTIME_TABELA = r"""
+(function(){
+var A=window.AWR, T=A.T;
+function sem(s){ return String(s==null?'':s).normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase(); }
+function nulo(){ return '<span class="awr-nulo">–</span>'; }
+function vazio(v){ return v===null||v===undefined||v===''||(typeof v==='number'&&!isFinite(v)); }
+function dataBR(v){ if(vazio(v)) return nulo(); var m=/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/.exec(String(v));
+  return m?m[3]+'/'+m[2]+'/'+m[1]+(m[4]?' '+m[4]+':'+m[5]:''):A.esc(v); }
+function numFmt(c){ var base=c.tipo==='barra'?(c.fmt||'pct'):c.tipo, f0=A.fmt(base), cache={};
+  return function(v, d){ if(vazio(v)) return nulo(); if(typeof v==='string') return A.esc(v);
+    var f=f0; if(c.fmt_campo&&d&&d[c.fmt_campo]){ var sp=d[c.fmt_campo]; f=cache[sp]||(cache[sp]=A.fmt(sp)); }
+    var s=f(v); if(c.sinal){ if(!/^[+-]/.test(s)&&v>0) s='+'+s; var bom=c.sinal==='inverso'?v<0:v>0, ruim=c.sinal==='inverso'?v>0:v<0;
+      return '<span class="'+(bom?'awr-pos':(ruim?'awr-neg':''))+'">'+s+'</span>'; } return s; }; }
+function formatador(c){
+  if(c.tipo==='data'||c.tipo==='datahora') return function(cell){ return dataBR(cell.getValue()); };
+  if(c.tipo==='selo') return function(cell){ var v=cell.getValue(); if(vazio(v)) return nulo(); var k=(c.selos&&c.selos[v])||'ok'; return '<span class="awr-selo '+k+'">'+A.esc(v)+'</span>'; };
+  if(c.tipo==='barra'){ var f=numFmt(c); return function(cell){ var v=cell.getValue(); if(vazio(v)||typeof v==='string') return f(v);
+      var esc=c.escala||1, ruim=(c.limite!=null&&v>c.limite);
+      var h='<div class="awr-pl"><div class="awr-trilho"><div class="awr-enche'+(ruim?' ruim':'')+'" style="width:'+Math.max(0,Math.min(100,v/esc*100))+'%"></div>';
+      if(c.limite!=null) h+='<div class="awr-marco" style="left:'+Math.min(100,c.limite/esc*100)+'%"></div>';
+      return h+'</div><span style="min-width:'+(c.rotulo_ch||6)+'ch">'+A.fmt(c.fmt||'pct')(v)+'</span></div>'; }; }
+  if(c.num) return (function(f){ return function(cell){ return f(cell.getValue(), cell.getData()); }; })(numFmt(c));
+  return function(cell){ var d=cell.getData(), v=cell.getValue(), txt=vazio(v)?'':A.esc(v);
+    var dica=c.dica&&d[c.dica]?' title="'+A.esc(d[c.dica])+'"':(txt?' title="'+txt+'"':'');
+    var corpo;
+    if(c.sub) corpo='<div class="awr-nm"><b'+dica+'>'+(txt||'–')+'</b><i>'+(vazio(d[c.sub])?'':A.esc(d[c.sub]))+'</i></div>';
+    else if(c.quebra) corpo=txt||nulo();
+    else corpo='<span class="corta"'+dica+'>'+(txt||'–')+'</span>';
+    if(c.tipo==='entidade'){ var cor=(c.cor_campo&&d[c.cor_campo])||T.outros;
+      if(!c.sub) corpo='<div class="awr-nm"><b'+dica+'>'+(txt||'–')+'</b></div>';
+      return '<div class="awr-ent"><span class="k" style="background:'+A.esc(cor)+'"></span>'+corpo+'</div>'; }
+    return corpo; };
+}
+function ordenador(c){
+  if(c.num) return function(a,b){ var x=vazio(a)||typeof a==='string'?-Infinity:+a, y=vazio(b)||typeof b==='string'?-Infinity:+b; return x-y; };
+  return function(a,b){ return String(a==null?'':a).localeCompare(String(b==null?'':b),'pt-BR',{sensitivity:'base',numeric:true}); };
+}
+function totalCalc(c){
+  if(!c.total) return undefined;
+  if(c.total==='soma') return 'sum'; if(c.total==='media') return 'avg'; if(c.total==='contagem') return 'count';
+  var txt=String(c.total); return function(){ return txt; };
+}
+function totalFmt(c){
+  if(!c.total) return undefined;
+  if(c.total==='contagem') return function(cell){ return A.fmt('num')(cell.getValue()); };
+  if(c.total==='soma'||c.total==='media'){ var f=A.fmt(c.tipo==='barra'?(c.fmt||'pct'):c.tipo), barra=c.tipo==='barra';
+    return function(cell){ var v=cell.getValue(); if(vazio(v)) return ''; var s=f(+v);
+      return barra?'<span style="margin-left:auto;font-variant-numeric:tabular-nums">'+s+'</span>':s; }; }
+  return function(cell){ return '<span class="corta">'+A.esc(cell.getValue())+'</span>'; };
+}
+function coluna(c){
+  var o={title:c.titulo, field:c.campo, formatter:formatador(c), sorter:ordenador(c),
+         headerSort:c.ordenavel!==false, headerSortStartingDir:c.num?'desc':'asc', resizable:true,
+         minWidth:c.min||(c.num?Math.max(76, String(c.titulo).length*8+34):90)};
+  if(c.num){ o.cssClass='num'; o.hozAlign='right'; o.headerHozAlign='right'; }
+  if(c.tipo==='barra'){ o.cssClass=''; o.hozAlign='left'; o.headerHozAlign='left'; o.minWidth=c.min||150; }
+  if(c.quebra) o.cssClass=(o.cssClass?o.cssClass+' ':'')+'quebra';
+  if(c.largura) o.width=c.largura;
+  if(c.cresce) o.widthGrow=c.cresce;
+  if(c.fixa) o.frozen=true;
+  var bc=totalCalc(c); if(bc){ o.bottomCalc=bc; o.bottomCalcFormatter=totalFmt(c);
+    if(bc==='avg') o.bottomCalcParams={precision:false}; }   // media sem arredondar em 2 casas
+  return o;
+}
+function guardar(chave){
+  var k='awr_tab_'+chave, s=null;
+  try{ s=JSON.parse(window.sessionStorage.getItem(k)||'null'); }catch(e){ s=null; }
+  return { lido:s||{}, salvar:function(o){ try{ var a=JSON.parse(window.sessionStorage.getItem(k)||'{}'); for(var x in o) a[x]=o[x]; window.sessionStorage.setItem(k, JSON.stringify(a)); }catch(e){} } };
+}
+function tabela(el, spec){
+  if(typeof el==='string') el=document.getElementById(el);
+  var inp=null, cont=null, total=spec.dados.length;
+  if(spec.busca){
+    var bar=document.createElement('div'); bar.className='awr-tbar';
+    inp=document.createElement('input'); inp.className='awr-busca'; inp.type='search';
+    inp.placeholder=spec.placeholder||'Buscar'; inp.setAttribute('aria-label',inp.placeholder);
+    cont=document.createElement('span'); cont.className='awr-cont';
+    bar.appendChild(inp); bar.appendChild(cont); el.appendChild(bar);
+  }
+  var box=document.createElement('div'); el.appendChild(box);
+  var cols=spec.colunas.map(coluna);
+  if(!total) cols.forEach(function(o){ delete o.bottomCalc; delete o.bottomCalcFormatter; });  // vazia: sem linha de total
+  var mem=spec.chave?guardar(spec.chave):null;
+  var opts={data:spec.dados, columns:cols, layout:spec.layout||'fitColumns',
+    renderVertical:spec.virtual?'virtual':'basic',
+    placeholder:spec.vazio||'Nenhum registro', columnHeaderVertAlign:'middle',
+    rowFormatter:function(row){ var d=row.getData(), e=row.getElement();
+      if(spec.destaque&&d[spec.destaque[0]]===spec.destaque[1]) e.classList.add('awr-destaque');
+      if(spec.linha_classe&&d[spec.linha_classe]) e.classList.add('awr-linha-'+d[spec.linha_classe]); }};
+  if(spec.altura_tabela) opts.height=spec.altura_tabela;     // sem altura = cresce do tamanho real
+  if(spec.ordem) opts.initialSort=[{column:spec.ordem[0], dir:spec.ordem[1]||'asc'}];
+  if(mem&&mem.lido.ordem&&mem.lido.ordem.length) opts.initialSort=mem.lido.ordem;
+  var tab=new Tabulator(box, opts);
+  if(mem) tab.on('dataSorted',function(sorters){ mem.salvar({ordem:sorters.map(function(s){ return {column:s.field, dir:s.dir}; })}); });
+  if(inp){
+    var campos=spec.busca_campos||[];
+    var conta=function(n){ cont.textContent=(n==null?total:n)+' de '+total; };
+    var filtrar=function(){ var q=sem(inp.value.trim()); if(mem) mem.salvar({busca:inp.value});
+      if(!q) tab.clearFilter(); else tab.setFilter(function(d){ for(var i=0;i<campos.length;i++){ if(sem(d[campos[i]]).indexOf(q)>=0) return true; } return false; }); };
+    inp.addEventListener('input',filtrar);
+    tab.on('dataFiltered',function(f,rows){ conta(rows.length); });
+    tab.on('tableBuilt',function(){ conta(total); if(mem&&mem.lido.busca){ inp.value=mem.lido.busca; filtrar(); } });
+  }
+  el.__awrTabela=tab;
+  return tab;
+}
+function montarTabela(el, spec){
+  var feito=false; function go(){ if(feito) return; feito=true; tabela(el, spec); }
+  var fam=T.fonte_carregar;
+  if(fam&&document.fonts&&document.fonts.load){
+    Promise.all([400,500,600,700].map(function(w){ return document.fonts.load(w+' 12px "'+fam+'"'); })).then(go,go);
+    setTimeout(go,1500);
+  } else go();
+}
+A.tabela=montarTabela;
+})();
+"""
+
+
+def pagina_tabela(spec, tema=None):
+    """Documento HTML completo com a tabela (iframe srcdoc / arquivo)."""
+    t = tema or spec.get("_tema") or TEMA_ESCURO
+    corpo = {k: v for k, v in spec.items() if not k.startswith("_")}
+    return (
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        f'<link href="{t.get("fonte_css", FONTE_CSS)}" rel="stylesheet">'
+        f'<link href="{TABULATOR_CSS}" rel="stylesheet">'
+        f"<style>{_css_tabela(t)}</style>"
+        f'<script src="{TABULATOR_JS}"></script>'
+        f"<script>{runtime_js(t)}</script><script>{_RUNTIME_TABELA}</script>"
+        f"</head><body><div id=\"t\" style=\"height:{int(spec['altura'])}px\"></div>"
+        f"<script>AWR.tabela('t', {para_json(corpo)});</script>"
+        "</body></html>"
+    )
+
+
+def st_tabela(spec, tema=None, key=None):
+    """Streamlit: desenha a tabela (iframe do components.html). Substitui st.dataframe
+    de leitura. `key` aceito e ignorado. Edicao (st.data_editor) continua no Streamlit."""
+    import streamlit.components.v1 as components
+    components.html(pagina_tabela(spec, tema), height=int(spec["altura"]), scrolling=False)
+
+
+def dash_tabela(spec, tema=None, id=None, style=None):
+    """Dash: html.Iframe com a tabela. Em callback, devolva pagina_tabela(spec)
+    para Output(<id>, 'srcDoc') de um dash_iframe_vazio(id, altura)."""
+    from dash import html
+    estilo = {"width": "100%", "height": f"{int(spec['altura'])}px", "border": "0", "display": "block",
+              "background": "transparent"}
+    estilo.update(style or {})
+    kw = {"id": id} if id else {}
+    return html.Iframe(srcDoc=pagina_tabela(spec, tema), style=estilo, **kw)
 
 
 # =============================================================================
