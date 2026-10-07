@@ -50,7 +50,9 @@ import json
 import math
 from copy import deepcopy
 
-__version__ = "1.5.0"
+__version__ = "1.5.1"
+# 1.5.1: cabecalho da tabela nao fica branco no hover (o CSS do Tabulator tinha
+#        regra mais especifica, #cdcdcd)
 # 1.5: tabelas: altura real quando cabe (sem faixa vazia acima do total), largura
 #      minima pelo conteudo, media sem arredondar, total alinhado na barra,
 #      sinal='inverso', fmt_campo (formato por linha), 'datahora', chave= (lembra
@@ -1780,7 +1782,12 @@ html,body{margin:0;padding:0;background:$fundo;overflow:hidden;font-family:$font
 .tabulator .tabulator-header .tabulator-col.num .tabulator-col-title-holder{justify-content:flex-end}
 .tabulator .tabulator-col-title{font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;overflow:visible;text-overflow:clip;white-space:nowrap;padding-right:0!important}
 .tabulator .tabulator-header .tabulator-col .tabulator-col-content .tabulator-col-sorter{position:static;margin:0}
-.tabulator .tabulator-header .tabulator-col.tabulator-sortable:hover{background:$hover_cab;color:$texto1}
+.tabulator .tabulator-header .tabulator-col.tabulator-sortable:hover,
+.tabulator .tabulator-header .tabulator-col.tabulator-sortable.tabulator-col-sorter-element:hover{background:$hover_cab!important;background-color:$hover_cab!important;color:$texto1}
+.tabulator .tabulator-header .tabulator-col.tabulator-sortable[aria-sort=none] .tabulator-col-content .tabulator-col-sorter.tabulator-col-sorter-element .tabulator-arrow:hover{border-bottom:6px solid $texto2}
+.tabulator .tabulator-header .tabulator-col.tabulator-sortable[aria-sort=ascending] .tabulator-col-content .tabulator-col-sorter.tabulator-col-sorter-element .tabulator-arrow:hover{border-bottom:6px solid $destaque}
+.tabulator .tabulator-header .tabulator-col.tabulator-sortable[aria-sort=descending] .tabulator-col-content .tabulator-col-sorter.tabulator-col-sorter-element .tabulator-arrow:hover{border-top:6px solid $destaque}
+.tabulator-row.tabulator-selectable:hover,.tabulator-row.tabulator-selected:hover{background-color:$hover!important}
 .tabulator .tabulator-header .tabulator-col[aria-sort="ascending"],.tabulator .tabulator-header .tabulator-col[aria-sort="descending"]{color:$destaque_claro}
 .tabulator .tabulator-col .tabulator-col-sorter .tabulator-arrow{border-bottom-color:$texto3}
 .tabulator .tabulator-col:not([aria-sort="ascending"]):not([aria-sort="descending"]) .tabulator-arrow{opacity:0;transition:opacity .15s}
