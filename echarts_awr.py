@@ -17,6 +17,8 @@ dict `option` do ECharts montado em Python; este modulo entrega:
                    HTML/Jinja que ja tem <head>), salvar_html (arquivo).
   * tabelas ...... coluna, tabela -> st_tabela (Streamlit), dash_tabela / pagina_tabela
                    (Dash) - Tabulator com busca, ordenacao numerica, total, selos.
+  * cards KPI .... kpi, variacao, kpis -> st_kpis (Streamlit), dash_kpis / pagina_kpis
+                   (Dash) - valor, variacao com seta, mini tendencia, "i", medidor.
   * matplotlib ... mpl_estilo, mpl_cor, mpl_eixo_fmt, mpl_rotulo_final,
                    mpl_rotular_barras, mpl_legenda - o mesmo visual em PDF/PNG/e-mail.
 
@@ -50,7 +52,8 @@ import json
 import math
 from copy import deepcopy
 
-__version__ = "1.5.1"
+__version__ = "1.6.0"
+# 1.6: cards de KPI (kpi, variacao, kpis, st_kpis, dash_kpis, pagina_kpis)
 # 1.5.1: cabecalho da tabela nao fica branco no hover (o CSS do Tabulator tinha
 #        regra mais especifica, #cdcdcd)
 # 1.5: tabelas: altura real quando cabe (sem faixa vazia acima do total), largura
@@ -2022,6 +2025,248 @@ def dash_tabela(spec, tema=None, id=None, style=None):
     estilo.update(style or {})
     kw = {"id": id} if id else {}
     return html.Iframe(srcDoc=pagina_tabela(spec, tema), style=estilo, **kw)
+
+
+# =============================================================================
+# CARDS DE KPI - padrao aprovado em 07/10/2026
+#
+#   cards = [ea.kpi("Patrimonio liquido", pl, fmt="brlc", serie=pl_30d, datas=datas_30d,
+#                   delta=ea.variacao(pl_30d), delta_fmt="varpct:2", base="vs ontem",
+#                   contexto="Fonte: carteira local", dica="Como e calculado..."),
+#            ea.kpi("Inadimplencia", 0.68, fmt="pct:2", delta=0.05, delta_fmt="pp:2", bom="baixa",
+#                   medidor={"valor": 0.68, "limite": 5, "max": 6, "rotulo": "limite 5%"},
+#                   selo=("Dentro do limite", "bom"))]
+#   ea.st_kpis(cards, tema=TEMA_GRAF)          # Streamlit (uma linha de cards)
+#   ea.dash_kpis(cards, tema=TEMA, id=...)     # Dash (callback: ea.pagina_kpis(spec) -> srcDoc)
+#
+# Regras: valor grande em pt-BR compacto; variacao com seta + sinal + cor que diz
+# se e BOM ou RUIM (bom='alta'|'baixa'|'neutro') e contra o que compara (base=);
+# tendencia so com historico de verdade (nunca inventar serie); limite = medidor
+# com marca + selo com texto; "i" explica o calculo.
+# =============================================================================
+def kpi(rotulo, valor=None, *, fmt="num", texto=None, unidade=None, delta=None, delta_fmt=None,
+        base="vs ontem", bom="alta", serie=None, datas=None, contexto=None, dica=None, selo=None,
+        medidor=None):
+    """Um card de KPI.
+    valor/fmt .. numero cru + formato (brl, brlc, pct:2, num...) | texto= valor ja escrito
+    unidade .... sufixo pequeno ao lado do valor (ex. 'dias')
+    delta ...... variacao numerica; delta_fmt (padrao 'varpct:2'); base ('vs ontem')
+    bom ........ 'alta' (subir e bom) | 'baixa' (subir e ruim) | 'neutro'
+    serie/datas  historico para a mini tendencia (datas = rotulos, ex. rotulos_data(...))
+    contexto ... linha cinza embaixo; dica = texto do "i" (como e calculado)
+    selo ....... (texto, 'bom'|'atencao'|'ruim'|'ok')
+    medidor .... dict(valor, limite, max=None, rotulo=None): barra com marca do limite"""
+    c = {"rotulo": str(rotulo), "fmt": fmt, "base": base, "bom": bom}
+    if valor is not None and not _vazio(valor):
+        c["valor"] = valor
+    for k, v in (("texto", texto), ("unidade", unidade), ("delta", delta), ("delta_fmt", delta_fmt),
+                 ("contexto", contexto), ("dica", dica)):
+        if v is not None and not (isinstance(v, float) and math.isnan(v)):
+            c[k] = v
+    if serie is not None:
+        vals = [None if _vazio(v) else v for v in list(serie)]
+        if sum(v is not None for v in vals) >= 2:
+            c["serie"] = vals
+            c["datas"] = [str(d) for d in (list(datas) if datas is not None else range(1, len(vals) + 1))]
+    if selo:
+        c["selo"] = [str(selo[0]), selo[1] if len(selo) > 1 else "ok"]
+    if medidor:
+        m = dict(medidor)
+        lim = float(m.get("limite") or 0)
+        m.setdefault("max", max(float(m.get("valor") or 0) * 1.15, lim * 1.2, 1e-9))
+        c["medidor"] = m
+    return c
+
+
+def variacao(serie, n=1, modo="pct"):
+    """Variacao do ultimo valor contra n pontos antes: 'pct' (%) ou 'abs' (diferenca).
+    None quando nao ha historico suficiente."""
+    vals = [v for v in list(serie or []) if not _vazio(v)]
+    if len(vals) <= n:
+        return None
+    a, b = float(vals[-1 - n]), float(vals[-1])
+    if modo == "abs":
+        return b - a
+    return None if a == 0 else (b / a - 1) * 100
+
+
+def kpis(cards, *, tema=None, colunas=None, altura=None):
+    """Especificacao de uma linha (ou grade) de cards para st_kpis / dash_kpis / pagina_kpis."""
+    t = tema or TEMA_ESCURO
+    cards = [dict(c) for c in cards]
+    n = max(len(cards), 1)
+    col = int(colunas or min(n, 6))
+    if altura is None:
+        tot = 0
+        for i in range(0, n, col):
+            linha = cards[i:i + col]
+            h = 30 + 18 + 36                                   # padding, rotulo, valor
+            h += 20 if any("delta" in c for c in linha) else 0
+            h += 44 if any("serie" in c for c in linha) else (34 if any("medidor" in c for c in linha) else 0)
+            h += 20 if any("contexto" in c for c in linha) else 0
+            tot += h + 10
+        altura = tot + 2
+    return {"cards": cards, "colunas": col, "altura": int(altura), "_tema": t}
+
+
+def _css_kpis(t):
+    from string import Template
+    escuro = t["nome"] == "escuro"
+    return Template(r"""
+html,body{margin:0;padding:0;background:$fundo;overflow:hidden;font-family:$fonte;color:$texto1}
+.awr-kpis{display:grid;gap:10px;padding:1px}
+.awr-kpi{position:relative;background:$sup;border:1px solid $borda;border-radius:12px;padding:13px 14px 10px;display:flex;flex-direction:column;gap:2px;min-width:0;
+ transition:border-color .15s,background .15s,transform .15s}
+.awr-kpi:hover{border-color:$borda_hover;background:$sup_hover;transform:translateY(-1px)}
+.awr-kpi .top{display:flex;align-items:center;justify-content:space-between;gap:6px;min-height:18px}
+.awr-kpi .rot{font-size:12.5px;font-weight:500;color:$texto2;display:flex;align-items:center;gap:6px;min-width:0}
+.awr-kpi .rot b{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.awr-kpi .info{width:15px;height:15px;border-radius:50%;border:1px solid $borda_info;color:$texto3;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;cursor:help;flex:none;font-style:normal}
+.awr-kpi .info:hover,.awr-kpi .info:focus{border-color:$destaque;color:$destaque_claro;outline:none}
+.awr-kpi .dica{display:none;position:absolute;left:8px;right:8px;top:36px;z-index:5;background:$tip_fundo;border:1px solid $tip_borda;border-radius:8px;padding:9px 11px;font-size:11.5px;font-weight:500;color:$texto2;line-height:1.45;box-shadow:$tip_sombra}
+.awr-kpi:has(.info:hover) .dica,.awr-kpi:has(.info:focus) .dica{display:block}
+.awr-kpi .val{font-size:clamp(19px,2.1vw,26px);font-weight:700;letter-spacing:-.01em;color:$texto1;line-height:1.15;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.awr-kpi .val small{font-size:.58em;font-weight:600;color:$texto2;margin-left:4px}
+.awr-kpi .delta{display:flex;align-items:center;gap:4px;font-size:12px;font-weight:600;white-space:nowrap;min-height:18px}
+.awr-kpi .delta i{font-style:normal;font-weight:500;color:$texto3;margin-left:2px;overflow:hidden;text-overflow:ellipsis}
+.awr-kpi .bom{color:$bom}.awr-kpi .ruim{color:$ruim}.awr-kpi .neutro{color:$texto2}
+.awr-kpi .spark{height:38px;margin:4px -4px 0}
+.awr-kpi .ctx{font-size:11.5px;color:$texto3;margin-top:auto;padding-top:2px;display:flex;align-items:center;justify-content:space-between;gap:6px;min-width:0}
+.awr-kpi .ctx > span:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.awr-kpi .ctx .selo,.awr-kpi .escala .selo{flex:none}
+.awr-kpi .selo{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap;color:$texto2;background:$selo_ok}
+.awr-kpi .selo:before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.awr-kpi .selo.bom{color:$bom;background:$bom_fundo}.awr-kpi .selo.atencao{color:$atencao;background:$atencao_fundo}.awr-kpi .selo.ruim{color:$ruim;background:$ruim_fundo}
+.awr-kpi .medidor{position:relative;height:6px;border-radius:3px;background:$trilho;margin:10px 0 3px}
+.awr-kpi .medidor .enche{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:$destaque}
+.awr-kpi .medidor .enche.ruim{background:$perigo}
+.awr-kpi .medidor .marco{position:absolute;top:-4px;bottom:-4px;border-left:1.5px dashed $perigo_marco}
+.awr-kpi .escala{display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:10.5px;color:$texto3;margin-top:3px}
+""").safe_substitute(
+        fundo=t["fundo"], fonte=t["fonte"], texto1=t["texto1"], texto2=t["texto2"], texto3=t["texto3"],
+        sup=t["superficie"], sup_hover=_misturar(t["superficie"], t["destaque"], 0.04),
+        borda=_hex_mpl(t["tooltip_borda"]) if escuro else "#E2E8F0",
+        borda_hover=_misturar(t["superficie"], t["destaque"], 0.35),
+        borda_info=_misturar(t["superficie"], t["texto3"], 0.45),
+        destaque=t["destaque"], destaque_claro=t["destaque_claro"],
+        tip_fundo=t["tooltip_fundo"], tip_borda=t["tooltip_borda"], tip_sombra=t["tooltip_sombra"],
+        bom=_misturar(t["sucesso"], "#FFFFFF", 0.25) if escuro else t["sucesso"],
+        ruim=_misturar(t["perigo"], "#FFFFFF", 0.35) if escuro else t["perigo"],
+        atencao=_misturar(t["alerta"], "#FFFFFF", 0.3) if escuro else "#9A6700",
+        bom_fundo=_rgba(t["sucesso"], 0.13), ruim_fundo=_rgba(t["perigo"], 0.13),
+        atencao_fundo=_rgba(t["alerta"], 0.13),
+        selo_ok=_rgba(t["texto3"], 0.12) if t["texto3"].startswith("#") else t["grade"],
+        trilho=_rgba(t["texto3"], 0.16) if t["texto3"].startswith("#") else t["grade"],
+        perigo=t["perigo"], perigo_marco=_rgba(t["perigo"], 0.75),
+    )
+
+
+_RUNTIME_KPIS = r"""
+(function(){
+var A=window.AWR, T=A.T;
+function vazio(v){ return v===null||v===undefined||v===''||(typeof v==='number'&&!isFinite(v)); }
+function el(tag, cls, txt){ var e=document.createElement(tag); if(cls) e.className=cls; if(txt!=null) e.textContent=txt; return e; }
+function card(c, i){
+  var k=el('div','awr-kpi');
+  var top=el('div','top'), rot=el('div','rot'); rot.appendChild(el('b',null,c.rotulo));
+  if(c.dica){ var inf=el('i','info','i'); inf.tabIndex=0; inf.setAttribute('aria-label','Como é calculado'); rot.appendChild(inf); }
+  top.appendChild(rot);
+  k.appendChild(top);
+  var selo=c.selo?el('span','selo '+(c.selo[1]||'ok'),c.selo[0]):null;   // vai embaixo: no topo cortava o rotulo
+  if(c.dica){ var d=el('div','dica',c.dica); k.appendChild(d); }
+  var v=el('div','val'); v.textContent=c.texto!=null?String(c.texto):(vazio(c.valor)?'–':A.fmt(c.fmt)(c.valor));
+  if(c.unidade) v.appendChild(el('small',null,c.unidade));
+  v.title=v.textContent; k.appendChild(v);
+  if(!vazio(c.delta)){
+    var dv=+c.delta, f=A.fmt(c.delta_fmt||'varpct:2'), s=f(dv);
+    if(!/^[+\-−]/.test(s)&&dv>0) s='+'+s;
+    var cls=c.bom==='neutro'||dv===0?'neutro':((c.bom==='baixa')===(dv<0)?'bom':'ruim');
+    var de=el('div','delta '+cls); de.textContent=(dv>0?'▲ ':(dv<0?'▼ ':'■ '))+s;
+    if(c.base) de.appendChild(el('i',null,c.base)); k.appendChild(de);
+  }
+  if(c.medidor){
+    var m=c.medidor, mx=+m.max||1, val=+m.valor, lim=m.limite;
+    var md=el('div','medidor'), en=el('div','enche'+(lim!=null&&val>lim?' ruim':''));
+    en.style.width=Math.max(0,Math.min(100,val/mx*100))+'%'; md.appendChild(en);
+    if(lim!=null){ var mc=el('div','marco'); mc.style.left=Math.min(100,lim/mx*100)+'%'; md.appendChild(mc); }
+    k.appendChild(md);
+    var es=el('div','escala'); es.appendChild(selo||el('span',null,m.rotulo_min||'0')); selo=null;
+    es.appendChild(el('span',null,m.rotulo||(lim!=null?'limite '+A.fmt(c.fmt)(lim):'')));
+    k.appendChild(es);
+  } else if(c.serie){ var sp=el('div','spark'); sp.id='awr-sp'+i; k.appendChild(sp); }
+  if(c.contexto||selo){ var cx=el('div','ctx'); var tx=el('span',null,c.contexto||''); tx.title=c.contexto||''; cx.appendChild(tx);
+    if(selo) cx.appendChild(selo); k.appendChild(cx); }
+  return k;
+}
+function spark(c, i){
+  var box=document.getElementById('awr-sp'+i); if(!box) return;
+  var ch=echarts.init(box), n=c.serie.length, f=A.fmt(c.fmt), ult=n-1;
+  while(ult>0&&vazio(c.serie[ult])) ult--;
+  ch.setOption({animationDuration:500,grid:{left:4,right:8,top:6,bottom:4},
+    xAxis:{type:'category',data:c.datas,show:false,boundaryGap:false},
+    yAxis:{type:'value',show:false,scale:true},
+    tooltip:{trigger:'axis',confine:true,backgroundColor:T.tooltip_fundo,borderColor:T.tooltip_borda,borderWidth:1,padding:[6,9],
+      textStyle:{color:T.texto1,fontFamily:T.fonte,fontSize:11.5},extraCssText:'border-radius:7px;box-shadow:'+T.tooltip_sombra+';',
+      axisPointer:{type:'line',lineStyle:{color:T.ponteiro,width:1}},
+      formatter:function(ps){ var p=ps[0]; if(vazio(p.value)) return ''; return '<span style="color:'+T.texto3+'">'+A.esc(p.axisValue)+'</span>&nbsp;&nbsp;<b>'+f(p.value)+'</b>'; }},
+    series:[{type:'line',data:c.serie,showSymbol:false,symbol:'circle',symbolSize:6,connectNulls:true,
+      lineStyle:{width:1.5,color:T.outros},itemStyle:{color:T.destaque},
+      areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'rgba(201,169,97,.16)'},{offset:1,color:'rgba(201,169,97,0)'}]}},
+      markPoint:{symbol:'circle',symbolSize:7,silent:true,itemStyle:{color:T.destaque,borderColor:T.superficie,borderWidth:1.5},label:{show:false},data:[{coord:[ult,c.serie[ult]]}]}}]});
+  if(window.ResizeObserver) new ResizeObserver(function(){ ch.resize(); }).observe(box);
+}
+function kpis(id, spec){
+  var raiz=document.getElementById(id);
+  raiz.className='awr-kpis'; raiz.style.gridTemplateColumns='repeat('+spec.colunas+',minmax(0,1fr))';
+  spec.cards.forEach(function(c,i){ raiz.appendChild(card(c,i)); });
+  var go=function(){ spec.cards.forEach(function(c,i){ if(c.serie&&!c.medidor) spark(c,i); }); };
+  var fam=T.fonte_carregar;
+  if(fam&&document.fonts&&document.fonts.load) Promise.all([500,700].map(function(w){ return document.fonts.load(w+' 12px "'+fam+'"'); })).then(go,go);
+  else go();
+}
+A.kpis=kpis;
+})();
+"""
+
+
+def pagina_kpis(spec, tema=None):
+    """Documento HTML com a linha de cards (iframe srcdoc / arquivo)."""
+    t = tema or spec.get("_tema") or TEMA_ESCURO
+    corpo = {k: v for k, v in spec.items() if not k.startswith("_")}
+    return (
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        f"<style>{_css_kpis(t)}</style>"
+        + cabecalho_html(t) +
+        f"<script>{_RUNTIME_KPIS}</script>"
+        f"</head><body><div id=\"k\"></div><script>AWR.kpis('k', {para_json(corpo)});</script>"
+        "</body></html>"
+    )
+
+
+def _spec_kpis(cards_ou_spec, tema, colunas, altura):
+    if isinstance(cards_ou_spec, dict) and "cards" in cards_ou_spec:
+        return cards_ou_spec
+    return kpis(cards_ou_spec, tema=tema, colunas=colunas, altura=altura)
+
+
+def st_kpis(cards, tema=None, *, colunas=None, altura=None, key=None):
+    """Streamlit: linha de cards de KPI (iframe do components.html)."""
+    import streamlit.components.v1 as components
+    spec = _spec_kpis(cards, tema, colunas, altura)
+    components.html(pagina_kpis(spec, tema), height=int(spec["altura"]), scrolling=False)
+
+
+def dash_kpis(cards, tema=None, *, colunas=None, altura=None, id=None, style=None):
+    """Dash: html.Iframe com os cards. Em callback, devolva pagina_kpis(ea.kpis(...))
+    para Output(<id>, 'srcDoc') de um dash_iframe_vazio(id, altura)."""
+    from dash import html
+    spec = _spec_kpis(cards, tema, colunas, altura)
+    estilo = {"width": "100%", "height": f"{int(spec['altura'])}px", "border": "0", "display": "block",
+              "background": "transparent"}
+    estilo.update(style or {})
+    kw = {"id": id} if id else {}
+    return html.Iframe(srcDoc=pagina_kpis(spec, tema), style=estilo, **kw)
 
 
 # =============================================================================

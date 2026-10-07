@@ -97,6 +97,11 @@ TEMA_GRAF = ea.tema_com(
     div_neg="#3987e5", div_meio="#2A3040", div_pos="#C8A96E",
 )
 
+# Altura fixa do iframe dos cards de KPI: a de uma linha com tudo (variação,
+# mini tendência e linha de contexto), para nenhum período cortar o card.
+_ALTURA_KPIS = ea.kpis([ea.kpi("x", 1, delta=1, serie=[1, 2], contexto="x")],
+                       tema=TEMA_GRAF, colunas=4)["altura"]
+
 # Cor de cada entidade, montada UMA vez com a lista completa (filtro/período
 # nunca repinta ninguém). CORES_FUNDOS manda; fundo novo sem cor fixa pega a
 # próxima cor da paleta do tema.
@@ -173,9 +178,6 @@ body {
 ::-webkit-scrollbar-track { background: #0A0B0E; }
 ::-webkit-scrollbar-thumb { background: #1E2330; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #2A3040; }
-
-.card-kpi { transition: transform 0.18s ease, box-shadow 0.18s ease; }
-.card-kpi:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.45) !important; }
 
 /* ── Tab buttons ── */
 .tab-btn {
@@ -614,7 +616,9 @@ app.layout = html.Div(
         ),
 
         # ── Cards resumo ──
-        html.Div(id="cards-resumo", style={"padding": "24px 36px 8px"}),
+        # (cards de KPI no padrão AWR, num iframe que o callback preenche)
+        html.Div(ea.dash_iframe_vazio("cards-resumo", _ALTURA_KPIS),
+                 style={"padding": "24px 36px 8px"}),
 
         # ── Barra de abas customizada ──
         html.Div(
@@ -914,17 +918,17 @@ def load_data(n_clicks, periodo):
 # CALLBACK: CARDS RESUMO
 # ─────────────────────────────────────────────────────────────────────────────
 @app.callback(
-    Output("cards-resumo", "children"),
+    Output("cards-resumo", "srcDoc"),
     Input("store-data", "data"),
 )
 def update_cards(cache_key):
     if not cache_key or cache_key not in _CACHE:
-        return html.Div("Carregando dados...", style={"color": "#666"})
+        return ea.pagina_aviso("Carregando dados...", _ALTURA_KPIS, TEMA_GRAF)
 
     d = _CACHE[cache_key]
     m = d["metricas"]
     if m.empty:
-        return html.Div("Sem dados para o período.", style={"color": "#C62828"})
+        return ea.pagina_aviso("Sem dados para o período.", _ALTURA_KPIS, TEMA_GRAF)
 
     awr = m[m["Fundo"] == NOME_AWR]
     pares = m[m["Fundo"] != NOME_AWR]
@@ -935,9 +939,23 @@ def update_cards(cache_key):
         v = df[col].iloc[0]
         return v if np.isfinite(v) else np.nan
 
+    def _mediana(col):
+        if pares.empty or col not in pares.columns:
+            return np.nan
+        return pares[col].median()
+
+    def _f(v, mult=1):
+        """float ou None (o card mostra '–'). mult=100: fração -> % (o fmt
+        'pct' do módulo espera o número já em %)."""
+        return float(v) * mult if v is not None and np.isfinite(v) else None
+
+    def _dif(a, b, mult=1):
+        return _f(a - b, mult) if np.isfinite(a) and np.isfinite(b) else None
+
     awr_ret = _val(awr, "Ret_acum")
     awr_sharpe = _val(awr, "Sharpe")
     awr_dd = _val(awr, "DD_max")
+    med_ret, med_sharpe, med_dd = _mediana("Ret_acum"), _mediana("Sharpe"), _mediana("DD_max")
 
     # Ranking
     if not pares.empty and np.isfinite(awr_ret):
@@ -949,69 +967,71 @@ def update_cards(cache_key):
     # Retorno semanal AWR
     awr_sem = d["rent_semana"].get(NOME_AWR, np.nan)
 
-    def card(titulo, valor, sub, cor_borda):
-        return html.Div(
-            className="card-kpi",
-            style={
-                "backgroundColor": "#111318",
-                "border": "1px solid #1E2330",
-                "borderTop": f"2px solid {cor_borda}",
-                "borderRadius": "8px",
-                "padding": "18px 22px",
-                "flex": "1",
-                "marginRight": "12px",
-                "boxShadow": "0 2px 12px rgba(0,0,0,0.35)",
-            },
-            children=[
-                html.Div(titulo, style={
-                    "fontSize": "10px", "color": "#5E6A7A",
-                    "textTransform": "uppercase", "letterSpacing": "1px",
-                    "fontWeight": 600,
-                }),
-                html.Div(valor, style={
-                    "fontSize": "26px", "fontWeight": 700, "color": "#EFF1F5",
-                    "marginTop": "6px",
-                    "fontFamily": "'JetBrains Mono', 'DM Mono', monospace",
-                    "letterSpacing": "-0.5px",
-                }),
-                html.Div(sub, style={
-                    "fontSize": "11px", "color": "#5E6A7A", "marginTop": "8px",
-                }),
-            ],
-        )
+    # Mini tendências (séries que o app já tem, em %):
+    # retorno acumulado = cota base 100 do AWR - 100 (o último ponto é o
+    # Ret_acum do card) e drawdown dia a dia (o mínimo é o DD_max do card).
+    def _serie(s):
+        s = s.dropna()
+        return [round(float(v) * 100, 4) for v in s], ea.rotulos_data(s.index, "dia_ano")
 
-    med_pares = pares["Ret_acum"].median() if not pares.empty else np.nan
-    delta = awr_ret - med_pares if np.isfinite(awr_ret) and np.isfinite(med_pares) else np.nan
+    ser_ret = dat_ret = ser_dd = dat_dd = None
+    cota = d["cota100"]
+    if NOME_AWR in cota.columns and np.isfinite(awr_ret):
+        c = cota[NOME_AWR]
+        ini = c.first_valid_index()
+        if ini is not None:
+            pos = c.index.get_loc(ini)
+            if pos > 0:                      # data-base do período = 0%
+                c = c.copy()
+                c.iloc[pos - 1] = 100.0
+            ser_ret, dat_ret = _serie(c / 100 - 1)
+    ret_d = d["ret_diarios"]
+    if NOME_AWR in ret_d.columns and np.isfinite(awr_dd):
+        ser_dd, dat_dd = _serie(drawdown_series(ret_d[NOME_AWR]))
 
-    return html.Div(
-        style={"display": "flex", "gap": "0"},
-        children=[
-            card(
-                "Retorno AWR no período",
-                fmt_pct(awr_ret),
-                f"Mediana peers: {fmt_pct(med_pares)}  ·  Δ: {fmt_pct(delta)}",
-                COR_AWR,
-            ),
-            card(
-                "Ranking de retorno",
-                f"{rank_ret}° / {total}" if total > 0 else "—",
-                f"Semana: {fmt_pct(awr_sem)}",
-                COR_POSITIVO,
-            ),
-            card(
-                "Sharpe AWR",
-                fmt_num(awr_sharpe),
-                f"Mediana peers: {fmt_num(pares['Sharpe'].median()) if not pares.empty else '—'}",
-                "#3498DB",
-            ),
-            card(
-                "Drawdown máximo",
-                fmt_pct(awr_dd),
-                f"Mediana peers: {fmt_pct(pares['DD_max'].median()) if not pares.empty else np.nan}",
-                COR_NEGATIVO,
-            ),
-        ],
-    )
+    cards = [
+        ea.kpi(
+            "Retorno AWR no período", _f(awr_ret, 100), fmt="pct:1",
+            delta=_dif(awr_ret, med_ret, 100), delta_fmt="pp:1",
+            base="vs mediana dos pares", bom="alta",
+            serie=ser_ret, datas=dat_ret,
+            contexto=f"Mediana dos pares: {ea.formatar(_f(med_ret, 100), 'pct:1')}",
+            dica="Retorno composto das cotas diárias do AWR (CVM) no período "
+                 "selecionado; a linha é o acumulado dia a dia. "
+                 "Δ = AWR − mediana dos pares, em p.p.",
+        ),
+        ea.kpi(
+            "Ranking de retorno",
+            texto=f"{rank_ret}° / {total}" if total > 0 else None,
+            contexto=f"Retorno AWR na semana: {ea.formatar(_f(awr_sem, 100), 'varpct:1')}",
+            dica="Posição do AWR entre os fundos com cota no período, pelo retorno "
+                 "acumulado (1º = maior). Semana = variação da cota do AWR nos "
+                 "últimos 7 dias corridos.",
+        ),
+        ea.kpi(
+            "Sharpe AWR", _f(awr_sharpe), fmt="num:2",
+            delta=_dif(awr_sharpe, med_sharpe), delta_fmt="num:2",
+            base="vs mediana dos pares", bom="alta",
+            # período curto (< 20 retornos diários) não tem Sharpe para ninguém
+            contexto=(f"Mediana dos pares: {ea.formatar(_f(med_sharpe), 'num:2')}"
+                      if np.isfinite(awr_sharpe) or np.isfinite(med_sharpe)
+                      else "Precisa de 20+ dias de cota no período"),
+            dica="Sharpe anualizado: média ÷ desvio-padrão do retorno diário acima "
+                 "do CDI do período, × √252 (mínimo de 20 dias). "
+                 "Δ = AWR − mediana dos pares.",
+        ),
+        ea.kpi(
+            "Drawdown máximo", _f(awr_dd, 100), fmt="pct:1",
+            delta=_dif(awr_dd, med_dd, 100), delta_fmt="pp:1",
+            base="vs mediana dos pares", bom="alta",
+            serie=ser_dd, datas=dat_dd,
+            contexto=f"Mediana dos pares: {ea.formatar(_f(med_dd, 100), 'pct:1')}",
+            dica="Maior queda da cota do AWR desde um pico, no período; a linha é a "
+                 "distância do pico dia a dia. Δ = AWR − mediana dos pares "
+                 "(positivo = queda menor).",
+        ),
+    ]
+    return ea.pagina_kpis(ea.kpis(cards, tema=TEMA_GRAF, colunas=4))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
