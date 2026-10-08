@@ -52,7 +52,9 @@ import json
 import math
 from copy import deepcopy
 
-__version__ = "1.7.1"
+__version__ = "1.7.2"
+# 1.7.2: regua arrastada para tras calculava ao contrario; agora sempre da data
+#        mais antiga para a mais nova
 # 1.7.1: regua numa camada do zrender (suave, sem piscar), destaca o trecho da curva
 #        (sem linha reta), cada clique pega o fundo debaixo do mouse
 # 1.7: regua de rentabilidade na linha (medir=): clicar na serie e arrastar
@@ -1485,11 +1487,13 @@ function medir(c, cfg){
   function limpar(){ if(!mostrando) return; mostrando=false; c.__awrRegua=null; camada.hide(); }
   function desenhar(s,i0,i1){
     var d=dados[s], j0=perto(d,i0), j1=perto(d,i1); if(j0==null||j1==null) return;
-    var a=v(d,j0), b=v(d,j1), r=rect();
+    var r=rect(), lo=Math.min(j0,j1), hi=Math.max(j0,j1), pts=[];
+    // a conta e SEMPRE da data mais antiga para a mais nova, nao importa o sentido
+    // do arraste (arrastar para tras invertia: dava a rentabilidade "ao contrario")
+    var a=v(d,lo), b=v(d,hi);
     var res=calc(a,b), cor=res==null||res===0?T.texto2:(res>0?T.positivo:T.negativo);
-    var lo=Math.min(j0,j1), hi=Math.max(j0,j1), pts=[];
     for(var k=lo;k<=hi;k++){ var y=v(d,k); if(y!=null) pts.push(c.convertToPixel({seriesIndex:s},[k,y])); }
-    var p0=c.convertToPixel({seriesIndex:s},[j0,a]), p1=c.convertToPixel({seriesIndex:s},[j1,b]);
+    var p0=c.convertToPixel({seriesIndex:s},[j0,v(d,j0)]), p1=c.convertToPixel({seriesIndex:s},[j1,v(d,j1)]);
     var xa=Math.min(p0[0],p1[0]), xb=Math.max(p0[0],p1[0]);
     var txt;
     if(res==null) txt='–';
@@ -1509,6 +1513,7 @@ function medir(c, cfg){
     rotulo.attr({x:lx,y:ly});
     if(!mostrando){ camada.show(); mostrando=true; }
     c.__awrRegua=s;                              // tooltip/foco presos no fundo medido ate limpar
+    c.__awrUltima={serie:s,de:lo,ate:hi,a:a,b:b,res:res};   // para conferencia/testes
   }
   criar();
   zr.on('mousedown',function(e){
