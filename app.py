@@ -1257,6 +1257,7 @@ def _opcao_evolucao(cota, cdi_acum):
     curtos = {s["nome"]: (_short_nome(s["nome"]) if s["nome"] in FUNDOS else s["nome"]) for s in series}
     opt = ea.linha(
         x, series, fmt="num:2", fmt_eixo="num", tema=t, escala=True, rotulo_final=False, cab=cab,
+        medir="razao",          # clicar no fundo e arrastar: rentabilidade entre os 2 pontos
         title=_titulo_grafico("Evolução comparada (base 100)"),
         grid={"top": 48, "right": 170},
         tooltip={"formatter": _tip_evolucao(cab)},

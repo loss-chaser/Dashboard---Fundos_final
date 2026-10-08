@@ -52,7 +52,8 @@ import json
 import math
 from copy import deepcopy
 
-__version__ = "1.6.0"
+__version__ = "1.7.0"
+# 1.7: regua de rentabilidade na linha (medir=): clicar na serie e arrastar
 # 1.6: cards de KPI (kpi, variacao, kpis, st_kpis, dash_kpis, pagina_kpis)
 # 1.5.1: cabecalho da tabela nao fica branco no hover (o CSS do Tabulator tinha
 #        regra mais especifica, #cdcdcd)
@@ -675,7 +676,7 @@ def linha(x, series, *, fmt="num", fmt_eixo=None, tema=None, area=None, rotulo_f
           refs=None, faixas=None, escala=False, zoom_=None, cab=None, rodape=None, titulo=None,
           legenda_=None, suave=False, empilhar=False, marcadores=False, ordenar_tooltip=None,
           eixo_min=None, eixo_max=None, conectar_nulos=False, rotulo_nome=False,
-          tooltip_proximo=None, extras_series=None, **extra):
+          tooltip_proximo=None, extras_series=None, medir=None, medir_passo="pregões", **extra):
     """Linha/area no tempo.
     x ........ rotulos do eixo X (use rotulos_data(...) para datas)
     series ... lista de numeros (1 serie) ou [dict(nome, dados, cor=None, fmt=None,
@@ -694,6 +695,12 @@ def linha(x, series, *, fmt="num", fmt_eixo=None, tema=None, area=None, rotulo_f
                ("e para aparecer so o que eu estou com o mouse").
     extras_series: {nome_da_serie: [(rotulo, valor_formatado), ...]} - linhas extras
                no tooltip_proximo (ex. nome completo, CNPJ)
+    medir .... regua: clicar na linha e arrastar mostra a variacao entre os 2 pontos.
+               'razao' (b/a-1: cota, preco, PL, base 100) | 'diferenca' (b-a no fmt,
+               + %) | 'acumulado' (serie ja e retorno acumulado em %). Liga a regua e
+               desliga o "arrastar move" do zoom (zoom fica no Ctrl+roda e na barrinha).
+               Pedido dele em 08/10/2026 na Evolucao do Fundos AWR.
+    medir_passo: palavra do contador de pontos ('pregões'; None esconde)
     """
     t = tema or TEMA_ESCURO
     ss = _normalizar_series(series)
@@ -779,6 +786,10 @@ def linha(x, series, *, fmt="num", fmt_eixo=None, tema=None, area=None, rotulo_f
         opt["xAxis"]["axisPointer"]["triggerEmphasis"] = False
     if zoom_:
         opt["dataZoom"] = zoom(zoom_, t)
+        if medir:                                    # arrastar agora e a regua, nao o "mover"
+            opt["dataZoom"][0]["moveOnMouseMove"] = False
+    if medir:
+        opt["awr_medir"] = {"modo": medir, "fmt": fmt, "passo": medir_passo}
     if mostra_leg:
         opt["legend"] = legenda(t, tipo="linha", top=22 if titulo else 0)
     if titulo:
@@ -1392,6 +1403,7 @@ var _ativo=null, _mouse=null;
 function proximo(ps){
   if(!Array.isArray(ps)) ps=[ps];
   var c=_ativo, melhor=null, dist=Infinity;
+  if(c&&c.__awrRegua!=null){ for(var q=0;q<ps.length;q++){ if(ps[q].seriesIndex===c.__awrRegua) return ps[q]; } }
   ps.forEach(function(p){
     if(p.seriesName&&p.seriesName.charAt(0)==='_'&&p.seriesName!=='_serie') return;
     var v=valorDe(p); if(vazio(v)) return;
@@ -1426,6 +1438,86 @@ function tipProximo(o){
     return h;
   };
 }
+// --- regua de rentabilidade: clicar na linha e arrastar mostra a variacao daquela
+// serie entre o ponto do clique e o ponto do mouse (faixa + rotulo). Clique simples
+// ou Esc limpa. cfg: {modo:'razao'|'diferenca'|'acumulado', fmt, rotulos, passo}
+function medir(c, cfg){
+  var IDS=['awr-m-faixa','awr-m-linha','awr-m-p0','awr-m-p1','awr-m-rot'];
+  var arr=null, mostrando=false, dados=null, nomes=null, cores=null;
+  function rect(){ try{ return c.getModel().getComponent('grid',0).coordinateSystem.getRect(); }catch(e){ return null; } }
+  function dentro(x,y){ var r=rect(); return r&&x>=r.x&&x<=r.x+r.width&&y>=r.y-4&&y<=r.y+r.height+4; }
+  function v(d,i){ var x=d&&d[i]; if(x&&typeof x==='object'&&!Array.isArray(x)) x=x.value; if(Array.isArray(x)) x=x[x.length-1]; return vazio(x)?null:+x; }
+  function perto(d,i){ for(var k=0;k<d.length;k++){ if(i-k>=0&&v(d,i-k)!=null) return i-k; if(i+k<d.length&&v(d,i+k)!=null) return i+k; } return null; }
+  function idx(x,y){ var p=c.convertFromPixel({gridIndex:0},[x,y]); var i=Math.round(Array.isArray(p)?p[0]:p); var n=dados[0]?dados[0].length:0; return Math.max(0,Math.min(n-1,i)); }
+  function carregar(){ var o=c.getOption(), sel=(o.legend&&o.legend[0]&&o.legend[0].selected)||{};
+    dados=[]; nomes=[]; cores=[];
+    (o.series||[]).forEach(function(s){ var oculto=(s.name&&s.name.charAt(0)==='_'&&s.name!=='_serie')||sel[s.name]===false||s.type!=='line';
+      dados.push(oculto?[]:(s.data||[])); nomes.push(s.name&&s.name.charAt(0)!=='_'?s.name:''); cores.push((s.lineStyle&&s.lineStyle.color)||(s.itemStyle&&s.itemStyle.color)||T.destaque); }); }
+  function maisPerto(i,y){ var m=null,dist=Infinity; dados.forEach(function(d,si){ var j=perto(d,i); if(j==null) return; var pt=c.convertToPixel({seriesIndex:si},[j,v(d,j)]); var dd=Math.abs(pt[1]-y); if(dd<dist){dist=dd;m=si;} }); return m; }
+  function rot(i){ var r=cfg.rotulos; return r&&r[i]!=null?String(r[i]):String(i); }
+  function calc(a,b){ if(cfg.modo==='diferenca') return b-a; if(cfg.modo==='acumulado'){ var k=/^pctf/.test(cfg.fmt||'')?1:100; return ((1+b/k)/(1+a/k)-1)*100; } return a===0?null:(b/a-1)*100; }
+  function limpar(){ if(!mostrando) return; mostrando=false; c.__awrRegua=null;
+    c.setOption({graphic:IDS.map(function(id){ return {id:id,$action:'remove'}; })}); }
+  function desenhar(s,i0,i1){
+    var d=dados[s], j0=perto(d,i0), j1=perto(d,i1); if(j0==null||j1==null) return;
+    var a=v(d,j0), b=v(d,j1), r=rect(), p0=c.convertToPixel({seriesIndex:s},[j0,a]), p1=c.convertToPixel({seriesIndex:s},[j1,b]);
+    var res=calc(a,b), cor=res==null||res===0?T.texto2:(res>0?T.positivo:T.negativo);
+    var txt;
+    if(res==null) txt='–';
+    else if(cfg.modo==='diferenca'){ var f=fmt(cfg.fmt||'num'), s1=f(res); if(res>0&&!/^[+]/.test(s1)) s1='+'+s1; txt=s1+(a?'  ('+(b/a>1?'+':'')+nf(2).format((b/a-1)*100)+'%)':''); }
+    else txt=(res>0?'+':'')+nf(2).format(res)+'%';
+    var lo=Math.min(j0,j1), hi=Math.max(j0,j1), n=hi-lo;
+    var sub=rot(lo)+' → '+rot(hi)+(cfg.passo&&n?' · '+n+' '+cfg.passo:'');
+    var nome=nomes[s]||'';
+    var W=Math.max(sub.length*6.1, nome.length*6.6, txt.length*9.6, 120)+26, H=nome?70:54;
+    var xa=Math.min(p0[0],p1[0]), xb=Math.max(p0[0],p1[0]);
+    var lx=p1[0]+14, ly=p1[1]-H-12;
+    if(r){ if(lx+W>r.x+r.width) lx=p1[0]-W-14; if(lx<r.x) lx=r.x+4; if(ly<r.y) ly=Math.min(p1[1]+14, r.y+r.height-H); }
+    var filhos=[{type:'rect',z:60,shape:{x:0,y:0,width:W,height:H,r:8},style:{fill:T.tooltip_fundo,stroke:T.tooltip_borda,lineWidth:1,shadowBlur:18,shadowColor:'rgba(0,0,0,.35)'}}];
+    var y=10;
+    if(nome){ filhos.push({type:'text',z:61,x:12,y:y,style:{text:nome,fill:T.texto2,font:'600 11px '+T.fonte}}); y+=16; }
+    filhos.push({type:'text',z:61,x:12,y:y,style:{text:txt,fill:cor,font:'700 17px '+T.fonte}}); y+=24;
+    filhos.push({type:'text',z:61,x:12,y:y,style:{text:sub,fill:T.texto3,font:'500 11px '+T.fonte}});
+    c.setOption({graphic:[
+      {id:'awr-m-faixa',type:'rect',silent:true,z:1,shape:{x:xa,y:r?r.y:0,width:Math.max(1,xb-xa),height:r?r.height:0},style:{fill:comAlfa(cor,.07)}},
+      {id:'awr-m-linha',type:'line',silent:true,z:50,shape:{x1:p0[0],y1:p0[1],x2:p1[0],y2:p1[1]},style:{stroke:cor,lineWidth:1.5,lineDash:[4,3]}},
+      {id:'awr-m-p0',type:'circle',silent:true,z:51,shape:{cx:p0[0],cy:p0[1],r:4.5},style:{fill:T.superficie,stroke:cores[s],lineWidth:2}},
+      {id:'awr-m-p1',type:'circle',silent:true,z:51,shape:{cx:p1[0],cy:p1[1],r:4.5},style:{fill:cor,stroke:T.superficie,lineWidth:2}},
+      {id:'awr-m-rot',type:'group',silent:true,z:60,x:lx,y:ly,children:filhos}]});
+    mostrando=true; c.__awrRegua=s;            // foco fica no fundo medido ate limpar
+  }
+  var zr=c.getZr();
+  zr.on('mousedown',function(e){
+    if(e.event&&e.event.button!==0) return;
+    if(!dentro(e.offsetX,e.offsetY)) return;
+    carregar(); limpar();
+    var i=idx(e.offsetX,e.offsetY);
+    var s=(c.__awrFoco!=null&&dados[c.__awrFoco]&&dados[c.__awrFoco].length)?c.__awrFoco:maisPerto(i,e.offsetY);
+    if(s==null) return;
+    arr={s:s,i0:i,moveu:false};
+    c.__awrMedindo=s; c.__awrFoco=s; focar(c,s);
+    c.dispatchAction({type:'hideTip'}); c.setOption({tooltip:{show:false}});
+    zr.setCursorStyle('crosshair');
+  });
+  zr.on('mousemove',function(e){
+    if(!arr) return;
+    var i=idx(e.offsetX,e.offsetY); if(i!==arr.i0) arr.moveu=true;
+    desenhar(arr.s,arr.i0,i); zr.setCursorStyle('crosshair');
+  });
+  function soltar(){
+    if(!arr) return;
+    var moveu=arr.moveu; arr=null; c.__awrMedindo=null;
+    c.setOption({tooltip:{show:true}});
+    if(!moveu) limpar();                       // clique simples: limpa a regua
+  }
+  zr.on('mouseup',soltar);
+  document.addEventListener('mouseup',soltar);
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape') limpar(); });
+  c.on('datazoom',limpar);
+  if(window.ResizeObserver) new ResizeObserver(limpar).observe(c.getDom());
+}
+function comAlfa(cor,a){ if(typeof cor!=='string'||cor.charAt(0)!=='#') return cor; var h=cor.slice(1); if(h.length===3) h=h.split('').map(function(x){return x+x;}).join('');
+  var n=parseInt(h.slice(0,6),16); return 'rgba('+(n>>16&255)+','+(n>>8&255)+','+(n&255)+','+a+')'; }
 function montar(el, opt){
   if(typeof el==='string') el=document.getElementById(el);
   if(!el) return null;
@@ -1433,8 +1525,12 @@ function montar(el, opt){
   function go(){
     if(feito) return; feito=true;
     var c=echarts.getInstanceByDom(el)||echarts.init(el,null,{renderer:'canvas'});
+    var med=opt.awr_medir;
+    if(med){ opt=Object.assign({},opt); delete opt.awr_medir;
+      if(!med.rotulos){ var xa=Array.isArray(opt.xAxis)?opt.xAxis[0]:opt.xAxis; med.rotulos=xa&&xa.data; } }
     c.setOption(opt,true);
     c.__awrN=(opt.series||[]).length;
+    if(med) medir(c, med);
     c.getZr().on('mousemove',function(e){ _ativo=c; _mouse=[e.offsetX,e.offsetY]; });
     c.getZr().on('globalout',function(){ if(c.__awrFoco!=null){ var f=c.__awrFoco; c.__awrFoco=null; focar(c,null); c.dispatchAction({type:'downplay',seriesIndex:f}); } });
     if(window.ResizeObserver) new ResizeObserver(function(){ c.resize(); }).observe(el);
