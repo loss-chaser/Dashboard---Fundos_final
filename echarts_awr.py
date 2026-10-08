@@ -52,7 +52,9 @@ import json
 import math
 from copy import deepcopy
 
-__version__ = "1.7.0"
+__version__ = "1.7.1"
+# 1.7.1: regua numa camada do zrender (suave, sem piscar), destaca o trecho da curva
+#        (sem linha reta), cada clique pega o fundo debaixo do mouse
 # 1.7: regua de rentabilidade na linha (medir=): clicar na serie e arrastar
 # 1.6: cards de KPI (kpi, variacao, kpis, st_kpis, dash_kpis, pagina_kpis)
 # 1.5.1: cabecalho da tabela nao fica branco no hover (o CSS do Tabulator tinha
@@ -1424,7 +1426,7 @@ function proximo(ps){
 function focar(c, idx){
   var n=c.__awrN||0, ss=[];
   for(var i=0;i<n;i++){ var a=(idx==null||i===idx)?1:0.16; ss.push({lineStyle:{opacity:a},itemStyle:{opacity:a},endLabel:{opacity:a}}); }
-  if(n) c.setOption({series:ss},{lazyUpdate:true,silent:true});
+  if(n) c.setOption({animationDurationUpdate:0,series:ss},{lazyUpdate:true,silent:true});
 }
 function tipProximo(o){
   o=o||{};
@@ -1438,83 +1440,106 @@ function tipProximo(o){
     return h;
   };
 }
-// --- regua de rentabilidade: clicar na linha e arrastar mostra a variacao daquela
-// serie entre o ponto do clique e o ponto do mouse (faixa + rotulo). Clique simples
-// ou Esc limpa. cfg: {modo:'razao'|'diferenca'|'acumulado', fmt, rotulos, passo}
+// --- regua de rentabilidade: clicar NA LINHA e arrastar mostra a variacao daquela
+// serie entre o ponto do clique e o do mouse. Desenhada numa camada propria do
+// zrender (nao passa pelo setOption a cada movimento: fica suave e nao pisca).
+// Solto, fica; clique simples ou Esc limpa. cfg: {modo, fmt, rotulos, passo}
 function medir(c, cfg){
-  var IDS=['awr-m-faixa','awr-m-linha','awr-m-p0','awr-m-p1','awr-m-rot'];
-  var arr=null, mostrando=false, dados=null, nomes=null, cores=null;
+  var G=echarts.graphic, zr=c.getZr();
+  var arr=null, mostrando=false, dados=null, nomes=null, cores=null, camada=null;
+  var faixa, trecho, q0, q1, rotulo, caixa, tNome, tVal, tSub;
   function rect(){ try{ return c.getModel().getComponent('grid',0).coordinateSystem.getRect(); }catch(e){ return null; } }
   function dentro(x,y){ var r=rect(); return r&&x>=r.x&&x<=r.x+r.width&&y>=r.y-4&&y<=r.y+r.height+4; }
   function v(d,i){ var x=d&&d[i]; if(x&&typeof x==='object'&&!Array.isArray(x)) x=x.value; if(Array.isArray(x)) x=x[x.length-1]; return vazio(x)?null:+x; }
   function perto(d,i){ for(var k=0;k<d.length;k++){ if(i-k>=0&&v(d,i-k)!=null) return i-k; if(i+k<d.length&&v(d,i+k)!=null) return i+k; } return null; }
-  function idx(x,y){ var p=c.convertFromPixel({gridIndex:0},[x,y]); var i=Math.round(Array.isArray(p)?p[0]:p); var n=dados[0]?dados[0].length:0; return Math.max(0,Math.min(n-1,i)); }
+  function idx(x,y){ var p=c.convertFromPixel({gridIndex:0},[x,y]); var i=Math.round(Array.isArray(p)?p[0]:p); var n=0; dados.forEach(function(d){ n=Math.max(n,d.length); }); return Math.max(0,Math.min(n-1,i)); }
   function carregar(){ var o=c.getOption(), sel=(o.legend&&o.legend[0]&&o.legend[0].selected)||{};
     dados=[]; nomes=[]; cores=[];
     (o.series||[]).forEach(function(s){ var oculto=(s.name&&s.name.charAt(0)==='_'&&s.name!=='_serie')||sel[s.name]===false||s.type!=='line';
       dados.push(oculto?[]:(s.data||[])); nomes.push(s.name&&s.name.charAt(0)!=='_'?s.name:''); cores.push((s.lineStyle&&s.lineStyle.color)||(s.itemStyle&&s.itemStyle.color)||T.destaque); }); }
+  // a serie e a que esta DEBAIXO DO MOUSE no clique (nao a do foco anterior)
   function maisPerto(i,y){ var m=null,dist=Infinity; dados.forEach(function(d,si){ var j=perto(d,i); if(j==null) return; var pt=c.convertToPixel({seriesIndex:si},[j,v(d,j)]); var dd=Math.abs(pt[1]-y); if(dd<dist){dist=dd;m=si;} }); return m; }
   function rot(i){ var r=cfg.rotulos; return r&&r[i]!=null?String(r[i]):String(i); }
   function calc(a,b){ if(cfg.modo==='diferenca') return b-a; if(cfg.modo==='acumulado'){ var k=/^pctf/.test(cfg.fmt||'')?1:100; return ((1+b/k)/(1+a/k)-1)*100; } return a===0?null:(b/a-1)*100; }
-  function limpar(){ if(!mostrando) return; mostrando=false; c.__awrRegua=null;
-    c.setOption({graphic:IDS.map(function(id){ return {id:id,$action:'remove'}; })}); }
+  function criar(){
+    camada=new G.Group({silent:true});
+    faixa=new G.Rect({silent:true,z:1,shape:{x:0,y:0,width:0,height:0},style:{fill:'rgba(0,0,0,0)'}});
+    trecho=new G.Polyline({silent:true,z:300,shape:{points:[]},style:{stroke:T.destaque,lineWidth:2.8,fill:null,lineJoin:'round',lineCap:'round'}});
+    q0=new G.Circle({silent:true,z:301,shape:{cx:0,cy:0,r:4.5},style:{fill:T.superficie,stroke:T.destaque,lineWidth:2}});
+    q1=new G.Circle({silent:true,z:301,shape:{cx:0,cy:0,r:5},style:{fill:T.destaque,stroke:T.superficie,lineWidth:2}});
+    rotulo=new G.Group({silent:true});
+    caixa=new G.Rect({silent:true,z:302,shape:{x:0,y:0,width:10,height:10,r:8},style:{fill:T.tooltip_fundo,stroke:T.tooltip_borda,lineWidth:1,shadowBlur:18,shadowColor:'rgba(0,0,0,.35)'}});
+    tNome=new G.Text({silent:true,z:303,x:12,y:10,style:{text:'',fill:T.texto2,font:'600 11px '+T.fonte}});
+    tVal=new G.Text({silent:true,z:303,x:12,y:26,style:{text:'',fill:T.texto1,font:'700 17px '+T.fonte}});
+    tSub=new G.Text({silent:true,z:303,x:12,y:50,style:{text:'',fill:T.texto3,font:'500 11px '+T.fonte}});
+    [caixa,tNome,tVal,tSub].forEach(function(e){ rotulo.add(e); });
+    [faixa,trecho,q0,q1,rotulo].forEach(function(e){ camada.add(e); });
+    zr.add(camada); camada.hide();
+  }
+  function opacidade(idx, extra){                // foco no fundo medido, sem animacao (nao pisca)
+    var n=c.__awrN||0, ss=[];
+    for(var i=0;i<n;i++){ var a=(idx==null||i===idx)?1:0.16; ss.push({lineStyle:{opacity:a},itemStyle:{opacity:a},endLabel:{opacity:a}}); }
+    var o={animationDurationUpdate:0,series:ss}; for(var k in (extra||{})) o[k]=extra[k];
+    c.setOption(o,{silent:true});
+  }
+  function limpar(){ if(!mostrando) return; mostrando=false; c.__awrRegua=null; camada.hide(); }
   function desenhar(s,i0,i1){
     var d=dados[s], j0=perto(d,i0), j1=perto(d,i1); if(j0==null||j1==null) return;
-    var a=v(d,j0), b=v(d,j1), r=rect(), p0=c.convertToPixel({seriesIndex:s},[j0,a]), p1=c.convertToPixel({seriesIndex:s},[j1,b]);
+    var a=v(d,j0), b=v(d,j1), r=rect();
     var res=calc(a,b), cor=res==null||res===0?T.texto2:(res>0?T.positivo:T.negativo);
+    var lo=Math.min(j0,j1), hi=Math.max(j0,j1), pts=[];
+    for(var k=lo;k<=hi;k++){ var y=v(d,k); if(y!=null) pts.push(c.convertToPixel({seriesIndex:s},[k,y])); }
+    var p0=c.convertToPixel({seriesIndex:s},[j0,a]), p1=c.convertToPixel({seriesIndex:s},[j1,b]);
+    var xa=Math.min(p0[0],p1[0]), xb=Math.max(p0[0],p1[0]);
     var txt;
     if(res==null) txt='–';
     else if(cfg.modo==='diferenca'){ var f=fmt(cfg.fmt||'num'), s1=f(res); if(res>0&&!/^[+]/.test(s1)) s1='+'+s1; txt=s1+(a?'  ('+(b/a>1?'+':'')+nf(2).format((b/a-1)*100)+'%)':''); }
     else txt=(res>0?'+':'')+nf(2).format(res)+'%';
-    var lo=Math.min(j0,j1), hi=Math.max(j0,j1), n=hi-lo;
-    var sub=rot(lo)+' → '+rot(hi)+(cfg.passo&&n?' · '+n+' '+cfg.passo:'');
-    var nome=nomes[s]||'';
-    var W=Math.max(sub.length*6.1, nome.length*6.6, txt.length*9.6, 120)+26, H=nome?70:54;
-    var xa=Math.min(p0[0],p1[0]), xb=Math.max(p0[0],p1[0]);
-    var lx=p1[0]+14, ly=p1[1]-H-12;
-    if(r){ if(lx+W>r.x+r.width) lx=p1[0]-W-14; if(lx<r.x) lx=r.x+4; if(ly<r.y) ly=Math.min(p1[1]+14, r.y+r.height-H); }
-    var filhos=[{type:'rect',z:60,shape:{x:0,y:0,width:W,height:H,r:8},style:{fill:T.tooltip_fundo,stroke:T.tooltip_borda,lineWidth:1,shadowBlur:18,shadowColor:'rgba(0,0,0,.35)'}}];
-    var y=10;
-    if(nome){ filhos.push({type:'text',z:61,x:12,y:y,style:{text:nome,fill:T.texto2,font:'600 11px '+T.fonte}}); y+=16; }
-    filhos.push({type:'text',z:61,x:12,y:y,style:{text:txt,fill:cor,font:'700 17px '+T.fonte}}); y+=24;
-    filhos.push({type:'text',z:61,x:12,y:y,style:{text:sub,fill:T.texto3,font:'500 11px '+T.fonte}});
-    c.setOption({graphic:[
-      {id:'awr-m-faixa',type:'rect',silent:true,z:1,shape:{x:xa,y:r?r.y:0,width:Math.max(1,xb-xa),height:r?r.height:0},style:{fill:comAlfa(cor,.07)}},
-      {id:'awr-m-linha',type:'line',silent:true,z:50,shape:{x1:p0[0],y1:p0[1],x2:p1[0],y2:p1[1]},style:{stroke:cor,lineWidth:1.5,lineDash:[4,3]}},
-      {id:'awr-m-p0',type:'circle',silent:true,z:51,shape:{cx:p0[0],cy:p0[1],r:4.5},style:{fill:T.superficie,stroke:cores[s],lineWidth:2}},
-      {id:'awr-m-p1',type:'circle',silent:true,z:51,shape:{cx:p1[0],cy:p1[1],r:4.5},style:{fill:cor,stroke:T.superficie,lineWidth:2}},
-      {id:'awr-m-rot',type:'group',silent:true,z:60,x:lx,y:ly,children:filhos}]});
-    mostrando=true; c.__awrRegua=s;            // foco fica no fundo medido ate limpar
+    var n=hi-lo, sub=rot(lo)+' → '+rot(hi)+(cfg.passo&&n?' · '+n+' '+cfg.passo:''), nome=nomes[s]||'';
+    faixa.setShape({x:xa,y:r?r.y:0,width:Math.max(1,xb-xa),height:r?r.height:0}); faixa.setStyle({fill:comAlfa(cor,.07)});
+    trecho.setShape({points:pts}); trecho.setStyle({stroke:cor});
+    q0.setShape({cx:p0[0],cy:p0[1]}); q0.setStyle({stroke:cores[s]});
+    q1.setShape({cx:p1[0],cy:p1[1]}); q1.setStyle({fill:cor});
+    tNome.setStyle({text:nome}); tVal.setStyle({text:txt,fill:cor}); tSub.setStyle({text:sub});
+    var yv=nome?26:10; tVal.attr({y:yv}); tSub.attr({y:yv+24});
+    var W=Math.max(tNome.getBoundingRect().width, tVal.getBoundingRect().width, tSub.getBoundingRect().width, 110)+24, H=yv+42;
+    caixa.setShape({width:W,height:H});
+    var lx=p1[0]+16, ly=p1[1]-H-14;
+    if(r){ if(lx+W>r.x+r.width) lx=p1[0]-W-16; if(lx<r.x) lx=r.x+4; if(ly<r.y) ly=Math.min(p1[1]+16, r.y+r.height-H); }
+    rotulo.attr({x:lx,y:ly});
+    if(!mostrando){ camada.show(); mostrando=true; }
+    c.__awrRegua=s;                              // tooltip/foco presos no fundo medido ate limpar
   }
-  var zr=c.getZr();
+  criar();
   zr.on('mousedown',function(e){
     if(e.event&&e.event.button!==0) return;
     if(!dentro(e.offsetX,e.offsetY)) return;
     carregar(); limpar();
-    var i=idx(e.offsetX,e.offsetY);
-    var s=(c.__awrFoco!=null&&dados[c.__awrFoco]&&dados[c.__awrFoco].length)?c.__awrFoco:maisPerto(i,e.offsetY);
+    var i=idx(e.offsetX,e.offsetY), s=maisPerto(i,e.offsetY);
     if(s==null) return;
     arr={s:s,i0:i,moveu:false};
-    c.__awrMedindo=s; c.__awrFoco=s; focar(c,s);
-    c.dispatchAction({type:'hideTip'}); c.setOption({tooltip:{show:false}});
+    c.__awrMedindo=s; c.__awrFoco=s;
+    c.dispatchAction({type:'hideTip'}); opacidade(s,{tooltip:{show:false}});
     zr.setCursorStyle('crosshair');
   });
   zr.on('mousemove',function(e){
     if(!arr) return;
     var i=idx(e.offsetX,e.offsetY); if(i!==arr.i0) arr.moveu=true;
-    desenhar(arr.s,arr.i0,i); zr.setCursorStyle('crosshair');
+    if(arr.moveu) desenhar(arr.s,arr.i0,i);
+    zr.setCursorStyle('crosshair');
   });
   function soltar(){
     if(!arr) return;
-    var moveu=arr.moveu; arr=null; c.__awrMedindo=null;
-    c.setOption({tooltip:{show:true}});
-    if(!moveu) limpar();                       // clique simples: limpa a regua
+    var moveu=arr.moveu, s=arr.s; arr=null; c.__awrMedindo=null;
+    if(moveu){ opacidade(s,{tooltip:{show:true}}); }
+    else { limpar(); c.__awrFoco=null; opacidade(null,{tooltip:{show:true}}); }   // clique simples: limpa
   }
   zr.on('mouseup',soltar);
   document.addEventListener('mouseup',soltar);
-  document.addEventListener('keydown',function(e){ if(e.key==='Escape') limpar(); });
-  c.on('datazoom',limpar);
-  if(window.ResizeObserver) new ResizeObserver(limpar).observe(c.getDom());
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&mostrando){ limpar(); c.__awrFoco=null; opacidade(null); } });
+  c.on('datazoom',function(){ if(mostrando){ limpar(); c.__awrFoco=null; opacidade(null); } });
+  var w0=null;
+  if(window.ResizeObserver) new ResizeObserver(function(){ var w=c.getDom().clientWidth; if(w0!==null&&w!==w0&&mostrando){ limpar(); opacidade(null); } w0=w; }).observe(c.getDom());
 }
 function comAlfa(cor,a){ if(typeof cor!=='string'||cor.charAt(0)!=='#') return cor; var h=cor.slice(1); if(h.length===3) h=h.split('').map(function(x){return x+x;}).join('');
   var n=parseInt(h.slice(0,6),16); return 'rgba('+(n>>16&255)+','+(n>>8&255)+','+(n&255)+','+a+')'; }
@@ -1532,7 +1557,7 @@ function montar(el, opt){
     c.__awrN=(opt.series||[]).length;
     if(med) medir(c, med);
     c.getZr().on('mousemove',function(e){ _ativo=c; _mouse=[e.offsetX,e.offsetY]; });
-    c.getZr().on('globalout',function(){ if(c.__awrFoco!=null){ var f=c.__awrFoco; c.__awrFoco=null; focar(c,null); c.dispatchAction({type:'downplay',seriesIndex:f}); } });
+    c.getZr().on('globalout',function(){ if(c.__awrRegua!=null||c.__awrMedindo!=null) return; if(c.__awrFoco!=null){ var f=c.__awrFoco; c.__awrFoco=null; focar(c,null); c.dispatchAction({type:'downplay',seriesIndex:f}); } });
     if(window.ResizeObserver) new ResizeObserver(function(){ c.resize(); }).observe(el);
     else window.addEventListener('resize',function(){ c.resize(); });
     el.__awr=c;
